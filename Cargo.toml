@@ -10,4 +10,8 @@ readme = "README.md"
 keywords = ["macos", "keyboard", "remap", "hjkl", "launchagent"]
 categories = ["command-line-utilities"]
 
+[[bin]]
+name = "hjkl"
+path = "src/main.rs"
+
 [dependencies]

@@ -1,27 +1,29 @@
 #!/bin/sh
 set -eu
 
-# Disable/stop the hjkl-for-mac LaunchAgent and optionally remove the binary.
+# Disable/stop the hjkl LaunchAgent and optionally remove the binary.
 # launchd handling is delegated to the binary's own `disable` subcommand.
 
-APP_NAME="hjkl-for-mac"
+APP_NAME="hjkl"
+LEGACY_APP_NAME="hjkl-for-mac"
 LABEL="com.kazuki-hanai.hjkl-for-mac"
 
 PREFIX=${PREFIX:-"$HOME/.local"}
 BIN_DIR=${BIN_DIR:-"$PREFIX/bin"}
 BINARY_PATH=${BINARY_PATH:-"$BIN_DIR/$APP_NAME"}
+LEGACY_BINARY_PATH=${LEGACY_BINARY_PATH:-"$BIN_DIR/$LEGACY_APP_NAME"}
 
 usage() {
 	cat <<USAGE_EOF
 Usage: scripts/uninstall.sh [--remove-binary]
 
-Disable and stop the hjkl-for-mac LaunchAgent.
+Disable and stop the hjkl LaunchAgent.
 
 Options:
   --remove-binary   Also remove the installed binary.
   -h, --help        Show this help.
 
-Environment overrides: PREFIX, BIN_DIR, BINARY_PATH.
+Environment overrides: PREFIX, BIN_DIR, BINARY_PATH, LEGACY_BINARY_PATH.
 USAGE_EOF
 }
 
@@ -48,6 +50,10 @@ fi
 if [ "$REMOVE_BINARY" -eq 1 ]; then
 	echo "Removing binary $BINARY_PATH..."
 	rm -f "$BINARY_PATH"
+	if [ "$LEGACY_BINARY_PATH" != "$BINARY_PATH" ]; then
+		echo "Removing legacy binary $LEGACY_BINARY_PATH..."
+		rm -f "$LEGACY_BINARY_PATH"
+	fi
 else
 	echo "Leaving binary in place: $BINARY_PATH (use --remove-binary to remove)."
 fi

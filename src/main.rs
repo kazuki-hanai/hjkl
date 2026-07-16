@@ -17,7 +17,7 @@ fn main() {
 
 #[cfg(not(target_os = "macos"))]
 fn main() {
-    eprintln!("hjkl-for-mac only supports macOS.");
+    eprintln!("hjkl only supports macOS.");
     std::process::exit(1);
 }
 
@@ -76,6 +76,7 @@ mod macos {
 
     const K_CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
     const EVENT_TAP_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+    const COMMAND_NAME: &str = "hjkl";
 
     // Marker placed on events synthesized by this process. Without it, the
     // event tap would see its own synthetic semicolon key events and suppress
@@ -188,7 +189,7 @@ mod macos {
                 Ok(())
             }
             Command::Version => {
-                println!("hjkl-for-mac {}", env!("CARGO_PKG_VERSION"));
+                println!("{COMMAND_NAME} {}", env!("CARGO_PKG_VERSION"));
                 Ok(())
             }
         }
@@ -213,7 +214,7 @@ mod macos {
             CGEventTapEnable(tap, true);
         }
 
-        println!("hjkl-for-mac is running.");
+        println!("{COMMAND_NAME} is running.");
         println!("Tap ';' alone for ';'. Hold ';' + h/j/k/l for left/down/up/right arrows.");
         println!("Hold ';' + another key to send Command + that key.");
         println!("Keep this process running. Press Ctrl-C to stop.");
@@ -277,7 +278,7 @@ mod macos {
     }
 
     fn unknown_argument(arg: &str) -> String {
-        format!("Unknown argument: {arg}\n\nRun `hjkl-for-mac --help` for usage.")
+        format!("Unknown argument: {arg}\n\nRun `{COMMAND_NAME} --help` for usage.")
     }
 
     fn create_event_tap(
@@ -325,6 +326,7 @@ mod macos {
     /// binary can offer `start`/`stop`/`restart`/`enable`/`disable`/`status`
     /// without any external shell scripts.
     mod service {
+        use super::COMMAND_NAME;
         use std::fs;
         use std::path::{Path, PathBuf};
         use std::process::{Command as SysCommand, Stdio};
@@ -374,10 +376,7 @@ mod macos {
 
         fn log_paths() -> Result<(PathBuf, PathBuf), String> {
             let dir = home_dir()?.join("Library/Logs");
-            Ok((
-                dir.join("hjkl-for-mac.log"),
-                dir.join("hjkl-for-mac.err.log"),
-            ))
+            Ok((dir.join("hjkl.log"), dir.join("hjkl.err.log")))
         }
 
         fn binary_path() -> Result<PathBuf, String> {
@@ -498,7 +497,7 @@ mod macos {
                 println!("If keys are not remapped yet, grant Accessibility permission to:");
                 println!("  {}", binary.display());
                 println!("System Settings -> Privacy & Security -> Accessibility");
-                println!("Then run `hjkl-for-mac restart`.");
+                println!("Then run `{COMMAND_NAME} restart`.");
             }
         }
 
@@ -522,9 +521,9 @@ mod macos {
             launchctl(&["bootstrap", &domain_target(), path_to_str(&plist)?])?;
             launchctl(&["kickstart", "-k", &service_target()])?;
 
-            println!("hjkl-for-mac started in the background.");
+            println!("{COMMAND_NAME} started in the background.");
             if !enabled {
-                println!("It will NOT auto-start at login. Run `hjkl-for-mac enable` for that.");
+                println!("It will NOT auto-start at login. Run `{COMMAND_NAME} enable` for that.");
             }
             print_permission_hint();
             Ok(())
@@ -541,28 +540,28 @@ mod macos {
             launchctl(&["bootstrap", &domain_target(), path_to_str(&plist)?])?;
             launchctl(&["kickstart", "-k", &service_target()])?;
 
-            println!("hjkl-for-mac enabled: it will auto-start at login and is running now.");
+            println!("{COMMAND_NAME} enabled: it will auto-start at login and is running now.");
             print_permission_hint();
             Ok(())
         }
 
         pub fn stop() -> Result<(), String> {
             if !is_loaded() {
-                println!("hjkl-for-mac is not running.");
+                println!("{COMMAND_NAME} is not running.");
                 return Ok(());
             }
             launchctl(&["bootout", &service_target()])?;
-            println!("hjkl-for-mac stopped.");
+            println!("{COMMAND_NAME} stopped.");
             Ok(())
         }
 
         pub fn restart() -> Result<(), String> {
             if is_loaded() {
                 launchctl(&["kickstart", "-k", &service_target()])?;
-                println!("hjkl-for-mac restarted.");
+                println!("{COMMAND_NAME} restarted.");
                 Ok(())
             } else {
-                println!("hjkl-for-mac was not running; starting it...");
+                println!("{COMMAND_NAME} was not running; starting it...");
                 start()
             }
         }
@@ -581,7 +580,7 @@ mod macos {
                 let _ = fs::remove_file(runtime);
             }
 
-            println!("hjkl-for-mac disabled: it will not auto-start at login and is stopped.");
+            println!("{COMMAND_NAME} disabled: it will not auto-start at login and is stopped.");
             Ok(())
         }
 
@@ -618,10 +617,10 @@ mod macos {
     fn print_help() {
         println!(
             "\
-hjkl-for-mac
+hjkl
 
 USAGE:
-    hjkl-for-mac [SUBCOMMAND]
+    hjkl [SUBCOMMAND]
 
 SUBCOMMANDS:
     (none) | run   Run the remapper in the foreground (Ctrl-C to stop).
@@ -646,7 +645,7 @@ NOTES:
     background via a per-user launchd LaunchAgent.
     `start` runs now but does NOT auto-start at login; `enable` does both.
     macOS will require Accessibility permission for this binary. After granting
-    it, run `hjkl-for-mac restart`.
+    it, run `hjkl restart`.
 "
         );
     }
@@ -928,8 +927,7 @@ NOTES:
         #[test]
         fn rendered_plist_passes_plutil_lint() {
             let plist = service::render_plist().expect("plist should render");
-            let path = std::env::temp_dir()
-                .join(format!("hjkl-for-mac-test-{}.plist", std::process::id()));
+            let path = std::env::temp_dir().join(format!("hjkl-test-{}.plist", std::process::id()));
             std::fs::write(&path, plist).expect("write temp plist");
 
             let output = std::process::Command::new("plutil")

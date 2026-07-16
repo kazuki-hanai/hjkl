@@ -24,16 +24,18 @@ Karabiner-Elements で使っていた `;` ベースのキーバインドを、Ru
 scripts/install.sh
 ```
 
+`hjkl` コマンドをそのまま使うには `~/.local/bin` を `PATH` に入れてください。未設定の場合でも、`~/.local/bin/hjkl start` のように絶対パスで実行できます。
+
 インストール後、System Settings → Privacy & Security → Accessibility で次のバイナリを許可してください。
 
 ```text
-~/.local/bin/hjkl-for-mac
+~/.local/bin/hjkl
 ```
 
 許可したら再起動します。
 
 ```sh
-hjkl-for-mac restart
+hjkl restart
 ```
 
 ## Service commands（デーモン操作）
@@ -41,12 +43,12 @@ hjkl-for-mac restart
 バイナリ自体が per-user の launchd LaunchAgent を管理します。シェルスクリプトは不要で、サブコマンドだけで完結します。
 
 ```sh
-hjkl-for-mac start      # 今すぐ裏で起動（ログイン時の自動起動はしない）
-hjkl-for-mac stop       # 停止
-hjkl-for-mac restart    # 再起動
-hjkl-for-mac enable     # ログイン時に自動起動するよう登録（今すぐ起動もする）
-hjkl-for-mac disable    # 自動起動を解除して停止
-hjkl-for-mac status     # 有効/起動状態と各種パスを表示
+hjkl start      # 今すぐ裏で起動（ログイン時の自動起動はしない）
+hjkl stop       # 停止
+hjkl restart    # 再起動
+hjkl enable     # ログイン時に自動起動するよう登録（今すぐ起動もする）
+hjkl disable    # 自動起動を解除して停止
+hjkl status     # 有効/起動状態と各種パスを表示
 ```
 
 - `start` … その場で裏に立ち上げます。ログイン時の自動起動はしません。
@@ -61,7 +63,7 @@ launchctl を直接使う必要はありませんが、内部的には `gui/<uid
 ```sh
 cargo run --release
 # または
-target/release/hjkl-for-mac
+target/release/hjkl
 ```
 
 実行中だけリマップが有効です。`Ctrl-C` で停止します。
@@ -69,9 +71,9 @@ target/release/hjkl-for-mac
 ## CLI
 
 ```sh
-hjkl-for-mac --help
-hjkl-for-mac --version
-hjkl-for-mac run --daemon   # LaunchAgent が使う常駐モード（権限が付くまで30秒ごとに再試行）
+hjkl --help
+hjkl --version
+hjkl run --daemon   # LaunchAgent が使う常駐モード（権限が付くまで30秒ごとに再試行）
 ```
 
 `run --daemon` は権限が未付与でも終了せず、30秒ごとにイベントタップ作成を再試行します。LaunchAgent はこのモードで起動されます。
@@ -83,8 +85,8 @@ Accessibility 権限がないとイベントタップを作成できません。
 1. System Settings
 2. Privacy & Security
 3. Accessibility
-4. LaunchAgent 実行時は `~/.local/bin/hjkl-for-mac`、手動実行時は Terminal/iTerm を許可
-5. 反映されないときは `hjkl-for-mac restart`
+4. LaunchAgent 実行時は `~/.local/bin/hjkl`、手動実行時は Terminal/iTerm を許可
+5. 反映されないときは `hjkl restart`
 
 ## Uninstall
 
