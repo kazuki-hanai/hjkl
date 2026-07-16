@@ -28,6 +28,8 @@ mod macos {
     use std::ptr;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicPtr, Ordering};
+    use std::thread;
+    use std::time::Duration;
 
     type Boolean = bool;
     type CFAllocatorRef = *const c_void;
@@ -73,6 +75,7 @@ mod macos {
     const KEY_UP_ARROW: CGKeyCode = 126;
 
     const K_CG_EVENT_FLAG_MASK_COMMAND: CGEventFlags = 1 << 20;
+    const EVENT_TAP_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
     // Marker placed on events synthesized by this process. Without it, the
     // event tap would see its own synthetic semicolon key events and suppress
@@ -108,6 +111,13 @@ mod macos {
             self.command_layer_active = false;
             self.semicolon_flags = 0;
         }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Command {
+        Run { daemon: bool },
+        Help,
+        Version,
     }
 
     #[link(name = "ApplicationServices", kind = "framework")]
@@ -159,31 +169,22 @@ mod macos {
     }
 
     pub fn run() -> Result<(), String> {
-        if std::env::args().any(|arg| arg == "-h" || arg == "--help") {
-            print_help();
-            return Ok(());
+        match parse_args(std::env::args().skip(1))? {
+            Command::Run { daemon } => run_event_loop(daemon),
+            Command::Help => {
+                print_help();
+                Ok(())
+            }
+            Command::Version => {
+                println!("hjkl-for-mac {}", env!("CARGO_PKG_VERSION"));
+                Ok(())
+            }
         }
+    }
 
+    fn run_event_loop(daemon: bool) -> Result<(), String> {
         let mask = event_mask(K_CG_EVENT_KEY_DOWN) | event_mask(K_CG_EVENT_KEY_UP);
-
-        let tap = unsafe {
-            CGEventTapCreate(
-                K_CG_HID_EVENT_TAP,
-                K_CG_HEAD_INSERT_EVENT_TAP,
-                K_CG_EVENT_TAP_OPTION_DEFAULT,
-                mask,
-                event_callback,
-                ptr::null_mut(),
-            )
-        };
-
-        if tap.is_null() {
-            return Err("Failed to create a keyboard event tap.\n\
-                 Grant this terminal/binary permission in macOS System Settings:\n\
-                 Privacy & Security -> Accessibility, and if necessary Input Monitoring.\n\
-                 Then restart the terminal and run `cargo run --release` again."
-                .to_string());
-        }
+        let tap = create_event_tap(mask, daemon)?;
 
         EVENT_TAP.store(tap, Ordering::SeqCst);
 
@@ -214,6 +215,66 @@ mod macos {
         Ok(())
     }
 
+    fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
+        let mut daemon = false;
+
+        for arg in args {
+            match arg.as_str() {
+                "-h" | "--help" => return Ok(Command::Help),
+                "-V" | "--version" => return Ok(Command::Version),
+                "--daemon" => daemon = true,
+                _ => {
+                    return Err(format!(
+                        "Unknown argument: {arg}\n\nRun `hjkl-for-mac --help` for usage."
+                    ));
+                }
+            }
+        }
+
+        Ok(Command::Run { daemon })
+    }
+
+    fn create_event_tap(
+        mask: CGEventMask,
+        retry_until_available: bool,
+    ) -> Result<CFMachPortRef, String> {
+        loop {
+            let tap = unsafe {
+                CGEventTapCreate(
+                    K_CG_HID_EVENT_TAP,
+                    K_CG_HEAD_INSERT_EVENT_TAP,
+                    K_CG_EVENT_TAP_OPTION_DEFAULT,
+                    mask,
+                    event_callback,
+                    ptr::null_mut(),
+                )
+            };
+
+            if !tap.is_null() {
+                return Ok(tap);
+            }
+
+            if !retry_until_available {
+                return Err(event_tap_permission_error());
+            }
+
+            eprintln!(
+                "{}\nRetrying in {} seconds for daemon mode...",
+                event_tap_permission_error(),
+                EVENT_TAP_RETRY_INTERVAL.as_secs()
+            );
+            thread::sleep(EVENT_TAP_RETRY_INTERVAL);
+        }
+    }
+
+    fn event_tap_permission_error() -> String {
+        "Failed to create a keyboard event tap.\n\
+         Grant this terminal/binary permission in macOS System Settings:\n\
+         Privacy & Security -> Accessibility, and if necessary Input Monitoring.\n\
+         Then restart the terminal or daemon."
+            .to_string()
+    }
+
     fn print_help() {
         println!(
             "\
@@ -222,6 +283,7 @@ hjkl-for-mac
 USAGE:
     cargo run --release
     target/release/hjkl-for-mac
+    target/release/hjkl-for-mac --daemon
 
 BEHAVIOR:
     ;          -> ;     (when tapped by itself)
@@ -233,6 +295,8 @@ BEHAVIOR:
 
 NOTES:
     The program must keep running to remap keys.
+    --daemon keeps the process alive and retries every 30 seconds if macOS
+    permissions are not granted yet. It is intended for LaunchAgent usage.
     macOS will require Accessibility/Input Monitoring permission for the
     terminal app or for this binary.
 "
@@ -281,17 +345,17 @@ NOTES:
             Err(_) => return event,
         };
 
-        if let Some(key_bit) = hjkl_key_bit(key_code) {
-            if state.mapped_keys_down & key_bit != 0 {
-                if event_type == K_CG_EVENT_KEY_UP {
-                    state.mapped_keys_down &= !key_bit;
-                }
-
-                let arrow_key = hjkl_to_arrow(key_code).expect("hjkl bit must have arrow mapping");
-                drop(state);
-                rewrite_as_arrow(event, arrow_key);
-                return event;
+        if let Some(key_bit) = hjkl_key_bit(key_code)
+            && state.mapped_keys_down & key_bit != 0
+        {
+            if event_type == K_CG_EVENT_KEY_UP {
+                state.mapped_keys_down &= !key_bit;
             }
+
+            let arrow_key = hjkl_to_arrow(key_code).expect("hjkl bit must have arrow mapping");
+            drop(state);
+            rewrite_as_arrow(event, arrow_key);
+            return event;
         }
 
         match (event_type, key_code) {
@@ -459,6 +523,24 @@ NOTES:
                 with_command_flag(shift_flag | K_CG_EVENT_FLAG_MASK_COMMAND),
                 shift_flag | K_CG_EVENT_FLAG_MASK_COMMAND
             );
+        }
+
+        #[test]
+        fn parses_cli_modes() {
+            assert_eq!(
+                parse_args(Vec::<String>::new()).unwrap(),
+                Command::Run { daemon: false }
+            );
+            assert_eq!(
+                parse_args(["--daemon".to_string()]).unwrap(),
+                Command::Run { daemon: true }
+            );
+            assert_eq!(parse_args(["--help".to_string()]).unwrap(), Command::Help);
+            assert_eq!(
+                parse_args(["--version".to_string()]).unwrap(),
+                Command::Version
+            );
+            assert!(parse_args(["--wat".to_string()]).is_err());
         }
     }
 }

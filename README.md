@@ -13,13 +13,59 @@ Karabiner-Elements で使っていた `;` ベースのキーバインドを、Ru
 
 実装は macOS の `CGEventTap` を使ってキーボードイベントを監視・書き換えます。外部 Rust crate には依存していません。
 
-## ビルド
+## Requirements
+
+- macOS
+- Rust toolchain
+- macOS Accessibility permission
+
+## Install as a LaunchAgent
+
+ログイン中に常駐させるには、macOS の per-user LaunchAgent としてインストールします。
 
 ```sh
-cargo build --release
+scripts/install-launch-agent.sh
 ```
 
-## 実行
+このスクリプトは次を行います。
+
+1. `cargo build --release`
+2. バイナリを `~/.local/bin/hjkl-for-mac` にコピー
+3. LaunchAgent plist を `~/Library/LaunchAgents/com.kazuki-hanai.hjkl-for-mac.plist` に生成
+4. `launchctl bootstrap` / `kickstart` で起動
+
+インストール後、System Settings → Privacy & Security → Accessibility で以下のバイナリを許可してください。
+
+```text
+~/.local/bin/hjkl-for-mac
+```
+
+権限がまだない状態で LaunchAgent が起動しても、`--daemon` モードではプロセスが終了せず、30秒ごとに低負荷でイベントタップ作成を再試行します。
+
+## Manage the LaunchAgent
+
+```sh
+# 状態確認
+launchctl print gui/$(id -u)/com.kazuki-hanai.hjkl-for-mac
+
+# 再起動
+launchctl kickstart -k gui/$(id -u)/com.kazuki-hanai.hjkl-for-mac
+
+# アンインストール（plistのみ削除、バイナリは残す）
+scripts/uninstall-launch-agent.sh
+
+# バイナリも削除
+REMOVE_BINARY=1 scripts/uninstall-launch-agent.sh
+```
+
+ログは以下に出力されます。
+
+```text
+~/Library/Logs/hjkl-for-mac.log
+~/Library/Logs/hjkl-for-mac.err.log
+```
+
+## Run manually
 
 ```sh
 cargo run --release
@@ -33,15 +79,25 @@ target/release/hjkl-for-mac
 
 実行中だけキーリマップが有効です。停止するにはターミナルで `Ctrl-C` を押してください。
 
-## macOS 権限
+## CLI
 
-初回実行時、macOS の権限がないとイベントタップを作成できません。その場合は次を許可してから、ターミナルを再起動して再実行してください。
+```sh
+hjkl-for-mac --help
+hjkl-for-mac --version
+hjkl-for-mac --daemon
+```
+
+`--daemon` は LaunchAgent 用です。macOS 権限がまだ付与されていない場合でも終了せず、30秒ごとに再試行します。
+
+## macOS permissions
+
+初回実行時、macOS の権限がないとイベントタップを作成できません。その場合は次を許可してください。
 
 1. System Settings
 2. Privacy & Security
 3. Accessibility
 4. 必要に応じて Input Monitoring
-5. 実行している Terminal/iTerm、またはビルドした `hjkl-for-mac` バイナリを許可
+5. 手動実行の場合は Terminal/iTerm、LaunchAgent 実行の場合は `~/.local/bin/hjkl-for-mac` を許可
 
 ## 元の Karabiner 設定との対応
 
@@ -59,41 +115,27 @@ target/release/hjkl-for-mac
 
 Karabiner-Elements のような常駐リマッパーと同程度で、ノート PC で 24 時間動かしても電池への影響は実用上ほぼありません。
 
-## デーモン（LaunchAgent）として常駐させる
-
-macOS でログインセッション中に常駐させるには **LaunchDaemon ではなく LaunchAgent** を使います。イベントタップはユーザーの GUI ログインセッションとアクセシビリティ権限を必要とするため、root で動く LaunchDaemon では正しく動作しません。
-
-`launchd/com.kazuki-hanai.hjkl-for-mac.plist` を用意しています。バイナリの絶対パスは環境に合わせて書き換えてください。
-
-### インストール
+## Development
 
 ```sh
-# 先にリリースビルドしておく
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 cargo build --release
-
-# plist を配置
-cp launchd/com.kazuki-hanai.hjkl-for-mac.plist ~/Library/LaunchAgents/
-
-# 読み込み（RunAtLoad=true なのでそのまま起動します）
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kazuki-hanai.hjkl-for-mac.plist
+plutil -lint launchd/com.kazuki-hanai.hjkl-for-mac.plist.template
+sh -n scripts/install-launch-agent.sh scripts/uninstall-launch-agent.sh
 ```
 
-### 状態確認・再起動・停止
+## OSS status
 
-```sh
-# 状態
-launchctl print gui/$(id -u)/com.kazuki-hanai.hjkl-for-mac
+This repository is ready for public OSS use with:
 
-# 手動で再起動
-launchctl kickstart -k gui/$(id -u)/com.kazuki-hanai.hjkl-for-mac
+- MIT license
+- Cargo package metadata
+- LaunchAgent installer/uninstaller scripts
+- GitHub Actions CI
+- contribution and security notes
 
-# 停止・アンロード
-launchctl bootout gui/$(id -u)/com.kazuki-hanai.hjkl-for-mac
-```
+## License
 
-### 注意点
-
-- launchd 経由で起動する場合、アクセシビリティ権限は **ターミナルではなくバイナリ本体** (`target/release/hjkl-for-mac`) に付与する必要があります。初回は System Settings → Privacy & Security → Accessibility で許可してください。
-- `ProcessType` を `Interactive` にしているのは、macOS のスロットリングを避けるためです。処理が遅延するとイベントタップがタイムアウトで一時無効化されることがあります（無効化された場合は自動で再有効化する実装にしています）。
-- `KeepAlive=true` なのでクラッシュ時や終了時に自動で再起動します。
-- ビルド成果物のパスを変えた場合は plist の `ProgramArguments` を合わせて更新してください。
+MIT

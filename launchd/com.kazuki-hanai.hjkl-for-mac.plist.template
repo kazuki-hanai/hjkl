@@ -6,17 +6,20 @@
 	<string>com.kazuki-hanai.hjkl-for-mac</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/kazukihanai/kazuki-hanai/hjkl-for-mac/target/release/hjkl-for-mac</string>
+		<string>__BINARY_PATH__</string>
+		<string>--daemon</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>StandardOutPath</key>
-	<string>/Users/kazukihanai/Library/Logs/hjkl-for-mac.log</string>
+	<string>__STDOUT_LOG_PATH__</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/kazukihanai/Library/Logs/hjkl-for-mac.err.log</string>
+	<string>__STDERR_LOG_PATH__</string>
 </dict>
 </plist>
