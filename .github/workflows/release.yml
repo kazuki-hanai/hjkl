@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag is on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "error: tagged commit $GITHUB_SHA is not on origin/main; refusing to release" >&2
+            exit 1
+          fi
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "hjkl-for-mac"))')"
+          echo "tag=$tag crate=$crate"
+          if [ "$tag" != "$crate" ]; then
+            echo "error: tag v$tag does not match Cargo.toml version $crate" >&2
+            exit 1
+          fi
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          dist="hjkl-${version}-macos-$(uname -m)"
+          mkdir -p "dist/$dist"
+          cp target/release/hjkl "dist/$dist/hjkl"
+          cp README.md LICENSE CHANGELOG.md "dist/$dist/"
+          tarball="${dist}.tar.gz"
+          tar -C dist -czf "$tarball" "$dist"
+          shasum -a 256 "$tarball" > "${tarball}.sha256"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            "$TARBALL" "${TARBALL}.sha256"

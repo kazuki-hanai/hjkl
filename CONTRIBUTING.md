@@ -30,3 +30,22 @@ Please include:
 This project installs a per-user LaunchAgent and reads keyboard events through
 macOS accessibility APIs. Please keep changes small and explain why new
 permissions, background behavior, or file-system writes are necessary.
+
+## Releasing
+
+Releases are automated by `.github/workflows/release.yml`, which runs when a
+`v*` tag is pushed.
+
+1. Update the version in `Cargo.toml` and move the `CHANGELOG.md`
+   `[Unreleased]` entries under a new version heading.
+2. Land those changes on `main` through a pull request.
+3. Tag the release commit and push the tag:
+
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+The workflow verifies the tag matches the `Cargo.toml` version, builds the
+release binary, packages a `.tar.gz` with a `.sha256` checksum, and publishes a
+GitHub release with generated notes.
