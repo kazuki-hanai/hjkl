@@ -190,8 +190,8 @@ This is intentional. These commands now fail if the service is loaded but key re
 ## Uninstall
 
 ```sh
-scripts/uninstall.sh                 # Disable auto-start and stop; keep the binary.
-scripts/uninstall.sh --remove-binary # Also remove the installed binary.
+scripts/uninstall.sh               # Disable auto-start, stop, and remove the binary.
+scripts/uninstall.sh --keep-binary # Disable/stop only; keep the installed binary.
 ```
 
 ## Relation to the original Karabiner-Elements setup
