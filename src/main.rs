@@ -34,6 +34,8 @@ mod macos {
     type Boolean = bool;
     type CFAllocatorRef = *const c_void;
     type CFIndex = c_long;
+    type CFDictionaryRef = *const c_void;
+    type CFBooleanRef = *const c_void;
     type CFMachPortRef = *mut c_void;
     type CFRunLoopRef = *mut c_void;
     type CFRunLoopSourceRef = *mut c_void;
@@ -123,6 +125,7 @@ mod macos {
         Enable,
         Disable,
         Status,
+        Permissions,
         Help,
         Version,
     }
@@ -155,11 +158,23 @@ mod macos {
         ) -> CGEventRef;
         fn CGEventPost(tap: u32, event: CGEventRef);
         fn AXIsProcessTrusted() -> Boolean;
+        static kAXTrustedCheckOptionPrompt: CFStringRef;
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         static kCFRunLoopCommonModes: CFStringRef;
+        static kCFBooleanTrue: CFBooleanRef;
+
+        fn CFDictionaryCreate(
+            allocator: CFAllocatorRef,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            num_values: CFIndex,
+            key_call_backs: *const c_void,
+            value_call_backs: *const c_void,
+        ) -> CFDictionaryRef;
 
         fn CFMachPortCreateRunLoopSource(
             allocator: CFAllocatorRef,
@@ -185,6 +200,7 @@ mod macos {
             Command::Enable => service::enable(),
             Command::Disable => service::disable(),
             Command::Status => service::status(),
+            Command::Permissions => request_permissions(),
             Command::Help => {
                 print_help();
                 Ok(())
@@ -284,6 +300,7 @@ mod macos {
             "enable" => ensure_no_extra_args(iter).map(|()| Command::Enable),
             "disable" => ensure_no_extra_args(iter).map(|()| Command::Disable),
             "status" => ensure_no_extra_args(iter).map(|()| Command::Status),
+            "permissions" => ensure_no_extra_args(iter).map(|()| Command::Permissions),
             other => Err(unknown_argument(other)),
         }
     }
@@ -347,6 +364,51 @@ mod macos {
 
     fn accessibility_is_trusted() -> bool {
         unsafe { AXIsProcessTrusted() }
+    }
+
+    fn request_accessibility_permission_prompt() -> bool {
+        let key = unsafe { kAXTrustedCheckOptionPrompt.cast::<c_void>() };
+        let value = unsafe { kCFBooleanTrue.cast::<c_void>() };
+        let keys = [key];
+        let values = [value];
+
+        let options = unsafe {
+            CFDictionaryCreate(
+                ptr::null(),
+                keys.as_ptr(),
+                values.as_ptr(),
+                1,
+                ptr::null(),
+                ptr::null(),
+            )
+        };
+
+        if options.is_null() {
+            return accessibility_is_trusted();
+        }
+
+        let trusted = unsafe { AXIsProcessTrustedWithOptions(options) };
+        unsafe {
+            CFRelease(options.cast());
+        }
+        trusted
+    }
+
+    fn request_permissions() -> Result<(), String> {
+        let trusted = request_accessibility_permission_prompt();
+        if trusted {
+            println!("Accessibility permission is already granted.");
+        } else {
+            println!("Requested Accessibility permission for hjkl.");
+            println!("If macOS opened System Settings, enable hjkl there.");
+            println!("If hjkl is not listed, add this binary manually:");
+            match std::env::current_exe() {
+                Ok(path) => println!("  {}", path.display()),
+                Err(_) => println!("  ~/.local/bin/hjkl"),
+            }
+            println!("Then run `hjkl restart`.");
+        }
+        Ok(())
     }
 
     /// Self-contained management of the per-user launchd LaunchAgent, so the
@@ -679,6 +741,7 @@ mod macos {
 
         pub fn start() -> Result<(), String> {
             ensure_log_dir()?;
+            let _ = super::request_accessibility_permission_prompt();
 
             let launch_agents = launch_agents_plist()?;
             let enabled = launch_agents.exists();
@@ -703,6 +766,7 @@ mod macos {
 
         pub fn enable() -> Result<(), String> {
             ensure_log_dir()?;
+            let _ = super::request_accessibility_permission_prompt();
 
             let plist = launch_agents_plist()?;
             write_plist_to(&plist)?;
@@ -732,6 +796,8 @@ mod macos {
         }
 
         pub fn restart() -> Result<(), String> {
+            let _ = super::request_accessibility_permission_prompt();
+
             let plist = if launch_agents_plist()?.exists() {
                 launch_agents_plist()?
             } else if runtime_plist()?.exists() {
@@ -835,6 +901,7 @@ SUBCOMMANDS:
     enable         Install a LaunchAgent so it auto-starts at login (starts now too).
     disable        Remove the LaunchAgent so it no longer auto-starts (stops now too).
     status         Show whether it is enabled/running and where files live.
+    permissions    Ask macOS to show the Accessibility permission prompt.
 
 BEHAVIOR:
     ;          -> ;     (when tapped by itself)
@@ -1121,6 +1188,10 @@ NOTES:
                 Command::Disable
             );
             assert_eq!(parse_args(["status".to_string()]).unwrap(), Command::Status);
+            assert_eq!(
+                parse_args(["permissions".to_string()]).unwrap(),
+                Command::Permissions
+            );
             assert_eq!(parse_args(["--help".to_string()]).unwrap(), Command::Help);
             assert_eq!(
                 parse_args(["--version".to_string()]).unwrap(),
