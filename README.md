@@ -1,72 +1,103 @@
 # hjkl-for-mac
 
-Karabiner-Elements で使っていた `;` ベースのキーバインドを、Rust の常駐 CLI アプリとして実装したものです。外部 Rust crate には依存せず、macOS の `CGEventTap` でキーボードイベントを監視・書き換えます。
+A small macOS keyboard remapper written in Rust. It recreates a semicolon-based Karabiner-Elements style layer without requiring Karabiner-Elements at runtime.
 
-| 入力 | 出力 |
+`hjkl-for-mac` installs a `hjkl` command and uses macOS `CGEventTap` to observe and rewrite keyboard events.
+
+| Input | Output |
 | --- | --- |
-| `;` を単独で押す | `;` |
-| `;` を押しながら `h` | 左矢印 |
-| `;` を押しながら `j` | 下矢印 |
-| `;` を押しながら `k` | 上矢印 |
-| `;` を押しながら `l` | 右矢印 |
-| `;` を押しながらその他のキー | `Command` + そのキー |
+| Tap `;` alone | `;` |
+| Hold `;` and press `h` | Left Arrow |
+| Hold `;` and press `j` | Down Arrow |
+| Hold `;` and press `k` | Up Arrow |
+| Hold `;` and press `l` | Right Arrow |
+| Hold `;` and press any other key | `Command` + that key |
 
 ## Requirements
 
 - macOS
-- Rust toolchain（ビルド時のみ）
-- macOS Accessibility permission
+- Rust toolchain, only needed to build from source
+- macOS Accessibility permission for the installed binary
 
 ## Quick start
 
 ```sh
-# ビルドして ~/.local/bin にインストールし、ログイン時に自動起動するよう有効化
 scripts/install.sh
 ```
 
-`hjkl` コマンドをそのまま使うには `~/.local/bin` を `PATH` に入れてください。未設定の場合でも、`~/.local/bin/hjkl start` のように絶対パスで実行できます。
+The installer builds the release binary, copies it to `~/.local/bin/hjkl`, installs a per-user LaunchAgent, and tries to start the service immediately.
 
-インストール後、System Settings → Privacy & Security → Accessibility で次のバイナリを許可してください。
+Add `~/.local/bin` to your `PATH` if you want to run `hjkl` directly. If it is not on your `PATH`, use the full path instead:
+
+```sh
+~/.local/bin/hjkl status
+```
+
+After installation, grant Accessibility permission to this binary:
 
 ```text
 ~/.local/bin/hjkl
 ```
 
-許可したら再起動します。
+Open:
+
+```text
+System Settings -> Privacy & Security -> Accessibility
+```
+
+If Input Monitoring lists the binary, allow it there too.
+
+Then restart the service:
 
 ```sh
 hjkl restart
 ```
 
-## Service commands（デーモン操作）
+A healthy setup should show:
 
-バイナリ自体が per-user の launchd LaunchAgent を管理します。シェルスクリプトは不要で、サブコマンドだけで完結します。
-
-```sh
-hjkl start      # 今すぐ裏で起動（ログイン時の自動起動はしない）
-hjkl stop       # 停止
-hjkl restart    # 再起動
-hjkl enable     # ログイン時に自動起動するよう登録（今すぐ起動もする）
-hjkl disable    # 自動起動を解除して停止
-hjkl status     # 有効/起動状態と各種パスを表示
+```text
+enabled: yes (auto-start at login)
+running: yes
+key remapping: active
+accessibility: granted
 ```
 
-- `start` … その場で裏に立ち上げます。ログイン時の自動起動はしません。
-- `enable` … `~/Library/LaunchAgents` に plist を置くことで、次回以降のログインでも勝手に立ち上がります。今すぐの起動も行います。
-- `disable` … plist を削除し、自動起動を解除して停止します。
-- `stop` … 今のプロセスを止めるだけで、`enable` 済みなら次回ログインでまた起動します。
+## Service commands
 
-launchctl を直接使う必要はありませんが、内部的には `gui/<uid>/com.kazuki-hanai.hjkl-for-mac` を操作しています。
+The `hjkl` binary manages its own per-user launchd LaunchAgent. You usually do not need to call `launchctl` directly.
 
-## Run in foreground（お試し）
+```sh
+hjkl start      # Start in the background now; do not enable auto-start at login.
+hjkl stop       # Stop the background service.
+hjkl restart    # Restart the background service.
+hjkl enable     # Enable auto-start at login and start now.
+hjkl disable    # Disable auto-start and stop now.
+hjkl status     # Show service state and file paths.
+```
+
+Notes:
+
+- `start` starts the service now, but does not install it for future logins.
+- `enable` writes a plist under `~/Library/LaunchAgents`, starts the service now, and makes it auto-start on future logins.
+- `disable` removes the LaunchAgent plist and stops the service.
+- `stop` only stops the current service. If the service is still enabled, it will start again on the next login.
+- The launchd service target is `gui/<uid>/com.kazuki-hanai.hjkl-for-mac`.
+
+## Run in the foreground
+
+For quick manual testing:
 
 ```sh
 cargo run --release
-# または
+```
+
+or:
+
+```sh
 target/release/hjkl
 ```
 
-実行中だけリマップが有効です。`Ctrl-C` で停止します。
+The remapper is active only while the process is running. Press `Ctrl-C` to stop it.
 
 ## CLI
 
@@ -75,40 +106,87 @@ hjkl --help
 hjkl --version
 ```
 
-`start` / `enable` は LaunchAgent 経由でバックグラウンド起動します。内部的には launchd が foreground プロセスを管理するため、手動で `run --launchd` を実行する必要はありません。
+`start` and `enable` run the remapper in the background through LaunchAgent. Internally, launchd manages a foreground process, so you should not normally run the internal launchd mode by hand.
 
 ## macOS permissions
 
-Accessibility 権限がないとイベントタップを作成できません。
+macOS must allow the binary to observe keyboard events. If permission is missing, the process can be loaded by launchd but the remapping will not work.
 
-1. System Settings
-2. Privacy & Security
-3. Accessibility
-4. LaunchAgent 実行時は `~/.local/bin/hjkl`、手動実行時は Terminal/iTerm を許可
-5. 反映されないときは `hjkl restart`
+Grant permission here:
+
+```text
+System Settings -> Privacy & Security -> Accessibility
+```
+
+Allow this binary:
+
+```text
+~/.local/bin/hjkl
+```
+
+If you rebuild or reinstall the binary, macOS may still show the old entry as enabled while denying the new binary. If `hjkl status` says `key remapping: not active` even though `accessibility: granted`, remove `~/.local/bin/hjkl` from Accessibility and add it again. Then run:
+
+```sh
+hjkl restart
+```
+
+If Input Monitoring lists `hjkl`, allow it there too.
+
+## Troubleshooting
+
+### `enabled: yes` and `running: yes`, but keys do not remap
+
+Check:
+
+```sh
+hjkl status
+```
+
+The important line is:
+
+```text
+key remapping: active
+```
+
+If it says `not active`, the daemon is loaded but cannot read keyboard events. Re-add `~/.local/bin/hjkl` in Accessibility, allow it in Input Monitoring if present, and run:
+
+```sh
+hjkl restart
+```
+
+### `hjkl enable` or `hjkl restart` exits with an error
+
+This is intentional. These commands now fail if the service is loaded but key remapping is not actually active. Follow the error message, then run `hjkl restart` again.
+
+### Logs
+
+```text
+~/Library/Logs/hjkl.log
+~/Library/Logs/hjkl.err.log
+```
 
 ## Uninstall
 
 ```sh
-scripts/uninstall.sh                 # 自動起動を解除して停止（バイナリは残す）
-scripts/uninstall.sh --remove-binary # バイナリも削除
+scripts/uninstall.sh                 # Disable auto-start and stop; keep the binary.
+scripts/uninstall.sh --remove-binary # Also remove the installed binary.
 ```
 
-## 元の Karabiner 設定との対応
+## Relation to the original Karabiner-Elements setup
 
-元の Karabiner-Elements 設定では、`;` を他キーと同時押しした場合に `right_command` として扱い、その上で `right_command + hjkl` を矢印キーにしていました。
+The original setup treated `;` as `right_command` when used with another key, then mapped `right_command + h/j/k/l` to arrow keys.
 
-この Rust 実装では、`hjkl` は矢印キーへ変換し、それ以外のキーではイベントに `Command` フラグを付与します。そのため `; + c` のようなショートカットは `Command + c` として動作します。
+This Rust implementation maps `; + h/j/k/l` directly to arrow keys. For other chords, it adds the `Command` modifier, so `; + c` behaves like `Command + c`.
 
-## 消費電力について
+## Power usage
 
-ほとんど消費しません。実装がポーリングではなく **イベント駆動** だからです。
+Power usage should be minimal. The implementation is event-driven, not polling-based.
 
-- `CFRunLoopRun()` はイベントが届くまでスレッドをスリープさせます（アイドル時 CPU 使用率はほぼ 0%）。
-- 購読しているのは `keyDown` / `keyUp` の 2 種類だけです。マウス移動などの高頻度イベントでは起こされません。
-- 1 キーあたりの処理はフィールドの読み書き程度で、無視できるコストです。
+- `CFRunLoopRun()` sleeps until keyboard events arrive.
+- The event tap listens only to `keyDown` and `keyUp` events, not high-frequency mouse events.
+- Per-key work is limited to reading and rewriting a few event fields.
 
-Karabiner-Elements のような常駐リマッパーと同程度で、ノート PC で 24 時間動かしても電池への影響は実用上ほぼありません。
+In practice, it should be comparable to other always-on keyboard remappers.
 
 ## Development
 
@@ -120,7 +198,7 @@ cargo build --release
 sh -n scripts/install.sh scripts/uninstall.sh
 ```
 
-LaunchAgent の plist はバイナリ（`src/main.rs` の `macos::service`）が生成します。`cargo test` が生成物を `plutil` で検証するため、別ファイルとして持たず単一の情報源に保っています。
+The LaunchAgent plist is generated by the binary itself in `src/main.rs`. `cargo test` renders the generated plist and validates it with `plutil`, so there is no separate plist template to keep in sync.
 
 ## License
 
