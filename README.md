@@ -48,6 +48,12 @@ After installation, grant Accessibility permission to this binary:
 ~/.local/bin/hjkl
 ```
 
+You can ask macOS to show the permission prompt with:
+
+```sh
+hjkl permissions
+```
+
 Open:
 
 ```text
@@ -82,6 +88,7 @@ hjkl restart    # Restart the background service.
 hjkl enable     # Enable auto-start at login and start now.
 hjkl disable    # Disable auto-start and stop now.
 hjkl status     # Show service state and file paths.
+hjkl permissions # Ask macOS to show the Accessibility permission prompt.
 ```
 
 Notes:
@@ -125,6 +132,12 @@ Grant permission here:
 
 ```text
 System Settings -> Privacy & Security -> Accessibility
+```
+
+You can open/request the prompt with:
+
+```sh
+hjkl permissions
 ```
 
 Allow this binary:
