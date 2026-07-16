@@ -73,10 +73,9 @@ target/release/hjkl
 ```sh
 hjkl --help
 hjkl --version
-hjkl run --daemon   # LaunchAgent が使う常駐モード（権限が付くまで30秒ごとに再試行）
 ```
 
-`run --daemon` は権限が未付与でも終了せず、30秒ごとにイベントタップ作成を再試行します。LaunchAgent はこのモードで起動されます。
+`start` / `enable` は LaunchAgent 経由でバックグラウンド起動します。内部的には launchd が foreground プロセスを管理するため、手動で `run --launchd` を実行する必要はありません。
 
 ## macOS permissions
 

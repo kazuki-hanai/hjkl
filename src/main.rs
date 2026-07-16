@@ -116,7 +116,7 @@ mod macos {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Command {
-        Run { daemon: bool },
+        Run { service_mode: bool },
         Start,
         Stop,
         Restart,
@@ -154,6 +154,7 @@ mod macos {
             key_down: Boolean,
         ) -> CGEventRef;
         fn CGEventPost(tap: u32, event: CGEventRef);
+        fn AXIsProcessTrusted() -> Boolean;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -177,7 +178,7 @@ mod macos {
 
     pub fn run() -> Result<(), String> {
         match parse_args(std::env::args().skip(1))? {
-            Command::Run { daemon } => run_event_loop(daemon),
+            Command::Run { service_mode } => run_event_loop(service_mode),
             Command::Start => service::start(),
             Command::Stop => service::stop(),
             Command::Restart => service::restart(),
@@ -195,9 +196,15 @@ mod macos {
         }
     }
 
-    fn run_event_loop(daemon: bool) -> Result<(), String> {
+    fn run_event_loop(service_mode: bool) -> Result<(), String> {
+        if service_mode {
+            println!(
+                "Running in launchd foreground mode. Use `{COMMAND_NAME} start` or `{COMMAND_NAME} enable` to run in the background."
+            );
+        }
+
         let mask = event_mask(K_CG_EVENT_KEY_DOWN) | event_mask(K_CG_EVENT_KEY_UP);
-        let tap = create_event_tap(mask, daemon)?;
+        let tap = create_event_tap(mask, service_mode)?;
 
         EVENT_TAP.store(tap, Ordering::SeqCst);
 
@@ -241,24 +248,31 @@ mod macos {
 
         let mut iter = args.iter();
         let Some(first) = iter.next() else {
-            return Ok(Command::Run { daemon: false });
+            return Ok(Command::Run {
+                service_mode: false,
+            });
         };
 
         match first.as_str() {
             // Legacy invocation kept for older LaunchAgent plists: `hjkl --daemon`.
-            "--daemon" => {
+            "--daemon" | "--launchd" => {
                 ensure_no_extra_args(iter)?;
-                Ok(Command::Run { daemon: true })
+                Ok(Command::Run { service_mode: true })
             }
             "run" => {
-                let mut daemon = false;
+                let mut service_mode = false;
                 for arg in iter {
                     match arg.as_str() {
-                        "--daemon" => daemon = true,
+                        "--launchd" => service_mode = true,
+                        // Backward compatibility only. This is intentionally
+                        // not documented because it does not detach into the
+                        // background; launchd does that by managing the
+                        // foreground process.
+                        "--daemon" => service_mode = true,
                         other => return Err(unknown_argument(other)),
                     }
                 }
-                Ok(Command::Run { daemon })
+                Ok(Command::Run { service_mode })
             }
             "start" => ensure_no_extra_args(iter).map(|()| Command::Start),
             "stop" => ensure_no_extra_args(iter).map(|()| Command::Stop),
@@ -306,7 +320,7 @@ mod macos {
             }
 
             eprintln!(
-                "{}\nRetrying in {} seconds for daemon mode...",
+                "{}\nRetrying in {} seconds for launchd foreground mode...",
                 event_tap_permission_error(),
                 EVENT_TAP_RETRY_INTERVAL.as_secs()
             );
@@ -320,6 +334,10 @@ mod macos {
          Privacy & Security -> Accessibility, and if necessary Input Monitoring.\n\
          Then restart the terminal or daemon."
             .to_string()
+    }
+
+    fn accessibility_is_trusted() -> bool {
+        unsafe { AXIsProcessTrusted() }
     }
 
     /// Self-contained management of the per-user launchd LaunchAgent, so the
@@ -412,7 +430,7 @@ mod macos {
 \t<array>\n\
 \t\t<string>{binary}</string>\n\
 \t\t<string>run</string>\n\
-\t\t<string>--daemon</string>\n\
+\t\t<string>--launchd</string>\n\
 \t</array>\n\
 \t<key>RunAtLoad</key>\n\
 \t<true/>\n\
@@ -491,6 +509,17 @@ mod macos {
                 .unwrap_or(false)
         }
 
+        fn kickstart_or_confirm_loaded() -> Result<(), String> {
+            match launchctl(&["kickstart", "-k", &service_target()]) {
+                Ok(()) => Ok(()),
+                Err(error) if is_loaded() => {
+                    eprintln!("warning: {error}; service is loaded, continuing.");
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        }
+
         fn print_permission_hint() {
             if let Ok(binary) = binary_path() {
                 println!();
@@ -519,7 +548,7 @@ mod macos {
             launchctl_quiet(&["bootout", &service_target()]);
             launchctl_quiet(&["enable", &service_target()]);
             launchctl(&["bootstrap", &domain_target(), path_to_str(&plist)?])?;
-            launchctl(&["kickstart", "-k", &service_target()])?;
+            kickstart_or_confirm_loaded()?;
 
             println!("{COMMAND_NAME} started in the background.");
             if !enabled {
@@ -538,7 +567,7 @@ mod macos {
             launchctl_quiet(&["bootout", &service_target()]);
             launchctl_quiet(&["enable", &service_target()]);
             launchctl(&["bootstrap", &domain_target(), path_to_str(&plist)?])?;
-            launchctl(&["kickstart", "-k", &service_target()])?;
+            kickstart_or_confirm_loaded()?;
 
             println!("{COMMAND_NAME} enabled: it will auto-start at login and is running now.");
             print_permission_hint();
@@ -557,7 +586,7 @@ mod macos {
 
         pub fn restart() -> Result<(), String> {
             if is_loaded() {
-                launchctl(&["kickstart", "-k", &service_target()])?;
+                kickstart_or_confirm_loaded()?;
                 println!("{COMMAND_NAME} restarted.");
                 Ok(())
             } else {
@@ -598,6 +627,14 @@ mod macos {
                 }
             );
             println!("running: {}", if is_loaded() { "yes" } else { "no" });
+            println!(
+                "accessibility: {}",
+                if super::accessibility_is_trusted() {
+                    "granted"
+                } else {
+                    "not granted"
+                }
+            );
             match binary_path() {
                 Ok(binary) => println!("binary:  {}", binary.display()),
                 Err(error) => println!("binary:  <unknown> ({error})"),
@@ -630,7 +667,6 @@ SUBCOMMANDS:
     enable         Install a LaunchAgent so it auto-starts at login (starts now too).
     disable        Remove the LaunchAgent so it no longer auto-starts (stops now too).
     status         Show whether it is enabled/running and where files live.
-    run --daemon   Foreground loop that retries permission every 30s (used by launchd).
 
 BEHAVIOR:
     ;          -> ;     (when tapped by itself)
@@ -644,6 +680,8 @@ NOTES:
     The program must keep running to remap keys. `enable`/`start` do this in the
     background via a per-user launchd LaunchAgent.
     `start` runs now but does NOT auto-start at login; `enable` does both.
+    Internal launchd mode runs in the foreground because launchd manages the
+    background service process.
     macOS will require Accessibility permission for this binary. After granting
     it, run `hjkl restart`.
 "
@@ -876,19 +914,31 @@ NOTES:
         fn parses_cli_modes() {
             assert_eq!(
                 parse_args(Vec::<String>::new()).unwrap(),
-                Command::Run { daemon: false }
+                Command::Run {
+                    service_mode: false
+                }
             );
             assert_eq!(
                 parse_args(["--daemon".to_string()]).unwrap(),
-                Command::Run { daemon: true }
+                Command::Run { service_mode: true }
+            );
+            assert_eq!(
+                parse_args(["--launchd".to_string()]).unwrap(),
+                Command::Run { service_mode: true }
             );
             assert_eq!(
                 parse_args(["run".to_string()]).unwrap(),
-                Command::Run { daemon: false }
+                Command::Run {
+                    service_mode: false
+                }
+            );
+            assert_eq!(
+                parse_args(["run".to_string(), "--launchd".to_string()]).unwrap(),
+                Command::Run { service_mode: true }
             );
             assert_eq!(
                 parse_args(["run".to_string(), "--daemon".to_string()]).unwrap(),
-                Command::Run { daemon: true }
+                Command::Run { service_mode: true }
             );
             assert_eq!(parse_args(["start".to_string()]).unwrap(), Command::Start);
             assert_eq!(parse_args(["stop".to_string()]).unwrap(), Command::Stop);
@@ -918,7 +968,7 @@ NOTES:
             assert!(plist.contains("<key>Label</key>"));
             assert!(plist.contains(service::LABEL));
             assert!(plist.contains("<string>run</string>"));
-            assert!(plist.contains("<string>--daemon</string>"));
+            assert!(plist.contains("<string>--launchd</string>"));
             assert!(plist.contains("<key>RunAtLoad</key>"));
             assert!(plist.contains("<key>KeepAlive</key>"));
             assert!(plist.trim_start().starts_with("<?xml"));
