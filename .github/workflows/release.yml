@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          echo "tag=$tag crate=$crate"
+          if [ "$tag" != "$crate" ]; then
+            echo "error: tag v$tag does not match Cargo.toml version $crate" >&2
+            exit 1
+          fi
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Package artifact
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          dist="hjkl-${version}-macos-$(uname -m)"
+          mkdir -p "dist/$dist"
+          cp target/release/hjkl "dist/$dist/hjkl"
+          cp README.md LICENSE "dist/$dist/"
+          tarball="${dist}.tar.gz"
+          tar -C dist -czf "$tarball" "$dist"
+          shasum -a 256 "$tarball" > "${tarball}.sha256"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            "$TARBALL" "${TARBALL}.sha256"

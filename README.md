@@ -27,6 +27,15 @@ scripts/install.sh
 
 The installer builds the release binary, copies it to `~/.local/bin/hjkl`, installs a per-user LaunchAgent, and tries to start the service immediately.
 
+### Prebuilt binary
+
+Tagged releases publish a macOS binary on the
+[Releases page](https://github.com/kazuki-hanai/hjkl-for-mac/releases). Download
+the `hjkl-<version>-macos-<arch>.tar.gz` archive, verify it against the
+`.sha256` file, extract it, and place `hjkl` on your `PATH` (for example in
+`~/.local/bin`). You still need to grant Accessibility permission as described
+below.
+
 Add `~/.local/bin` to your `PATH` if you want to run `hjkl` directly. If it is not on your `PATH`, use the full path instead:
 
 ```sh
