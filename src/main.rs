@@ -221,6 +221,10 @@ mod macos {
             CGEventTapEnable(tap, true);
         }
 
+        // Record that this process actually acquired the keyboard tap so that
+        // `start`/`enable`/`restart` and `status` can report the real state.
+        service::write_health(service::Health::Ok);
+
         println!("{COMMAND_NAME} is running.");
         println!("Tap ';' alone for ';'. Hold ';' + h/j/k/l for left/down/up/right arrows.");
         println!("Hold ';' + another key to send Command + that key.");
@@ -315,6 +319,11 @@ mod macos {
                 return Ok(tap);
             }
 
+            // The tap could not be created, almost always because macOS has not
+            // granted this binary permission. Record it so the management
+            // commands can surface a real error instead of a false success.
+            service::write_health(service::Health::TapFailed);
+
             if !retry_until_available {
                 return Err(event_tap_permission_error());
             }
@@ -348,6 +357,8 @@ mod macos {
         use std::fs;
         use std::path::{Path, PathBuf};
         use std::process::{Command as SysCommand, Stdio};
+        use std::thread;
+        use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
         pub const LABEL: &str = "com.kazuki-hanai.hjkl-for-mac";
 
@@ -436,8 +447,8 @@ mod macos {
 \t<true/>\n\
 \t<key>KeepAlive</key>\n\
 \t<true/>\n\
-\t<key>ThrottleInterval</key>\n\
-\t<integer>30</integer>\n\
+\t<key>ExitTimeOut</key>\n\
+\t<integer>1</integer>\n\
 \t<key>ProcessType</key>\n\
 \t<string>Interactive</string>\n\
 \t<key>StandardOutPath</key>\n\
@@ -470,6 +481,61 @@ mod macos {
                     .map_err(|error| format!("failed to create {}: {error}", dir.display()))?;
             }
             Ok(())
+        }
+
+        /// Ground-truth signal written by the launchd-run daemon itself, so the
+        /// management commands report whether keys are really being remapped
+        /// rather than merely whether launchd loaded the job.
+        pub enum Health {
+            Ok,
+            TapFailed,
+        }
+
+        fn health_path() -> Result<PathBuf, String> {
+            Ok(home_dir()?
+                .join("Library/Application Support")
+                .join(LABEL)
+                .join("health"))
+        }
+
+        /// Best-effort: recording health must never break the daemon.
+        pub fn write_health(status: Health) {
+            let Ok(path) = health_path() else {
+                return;
+            };
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let token = match status {
+                Health::Ok => "ok",
+                Health::TapFailed => "tap_failed",
+            };
+            let pid = std::process::id();
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or(0);
+            let _ = fs::write(&path, format!("{token} {pid} {ts}\n"));
+        }
+
+        pub fn clear_health() {
+            if let Ok(path) = health_path() {
+                let _ = fs::remove_file(path);
+            }
+        }
+
+        pub fn parse_health_token(contents: &str) -> Option<Health> {
+            match contents.split_whitespace().next()? {
+                "ok" => Some(Health::Ok),
+                "tap_failed" => Some(Health::TapFailed),
+                _ => None,
+            }
+        }
+
+        fn read_health() -> Option<Health> {
+            let path = health_path().ok()?;
+            let contents = fs::read_to_string(path).ok()?;
+            parse_health_token(&contents)
         }
 
         fn launchctl(args: &[&str]) -> Result<(), String> {
@@ -509,25 +575,81 @@ mod macos {
                 .unwrap_or(false)
         }
 
-        fn kickstart_or_confirm_loaded() -> Result<(), String> {
-            match launchctl(&["kickstart", "-k", &service_target()]) {
-                Ok(()) => Ok(()),
-                Err(error) if is_loaded() => {
-                    eprintln!("warning: {error}; service is loaded, continuing.");
-                    Ok(())
+        const VERIFY_READY_TIMEOUT: Duration = Duration::from_secs(2);
+
+        /// Poll the daemon's health signal to confirm it actually started
+        /// remapping keys. This is written by the launchd-run process itself,
+        /// so it stays accurate even when the controlling terminal has
+        /// different permissions than the installed binary.
+        fn verify_ready() -> Result<(), String> {
+            let deadline = Instant::now() + VERIFY_READY_TIMEOUT;
+            loop {
+                match read_health() {
+                    Some(Health::Ok) => return Ok(()),
+                    Some(Health::TapFailed) => return Err(not_ready_message()),
+                    None => {}
                 }
-                Err(error) => Err(error),
+
+                if Instant::now() >= deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(150));
             }
+
+            if !is_loaded() {
+                return Err(format!(
+                    "The launchd service did not stay loaded.\n\
+                     Check `{COMMAND_NAME} status` and the logs."
+                ));
+            }
+
+            Err(format!(
+                "Could not confirm key remapping started within {} seconds.\n\
+                 Check `{COMMAND_NAME} status` and the logs.",
+                VERIFY_READY_TIMEOUT.as_secs()
+            ))
         }
 
-        fn print_permission_hint() {
-            if let Ok(binary) = binary_path() {
-                println!();
-                println!("If keys are not remapped yet, grant Accessibility permission to:");
-                println!("  {}", binary.display());
-                println!("System Settings -> Privacy & Security -> Accessibility");
-                println!("Then run `{COMMAND_NAME} restart`.");
+        fn not_ready_message() -> String {
+            let binary = binary_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|_| format!("the {COMMAND_NAME} binary"));
+
+            let mut message = String::new();
+            message.push_str("The service is loaded, but key remapping is NOT active.\n");
+            if super::accessibility_is_trusted() {
+                message.push_str(
+                    "macOS says Accessibility is granted, but it still denied the keyboard tap.\n",
+                );
+                message
+                    .push_str("This often happens after rebuilding/reinstalling the binary.\n\n");
+                message.push_str("Remove and re-add this binary in:\n");
+                message.push_str("  System Settings -> Privacy & Security -> Accessibility\n");
+                message.push_str("Also allow it in Input Monitoring if that section lists it.\n");
+                message.push_str(&format!("Then run `{COMMAND_NAME} restart`.\n"));
+                message.push_str("Binary:\n");
+                message.push_str(&format!("  {binary}"));
+            } else {
+                message.push_str("macOS has not allowed this binary to read keyboard events.\n\n");
+                message.push_str(&format!(
+                    "Grant permission, then run `{COMMAND_NAME} restart`:\n"
+                ));
+                message.push_str("  System Settings -> Privacy & Security -> Accessibility\n");
+                message.push_str("  (and Input Monitoring, if it is listed)\n");
+                message.push_str("Allow this binary:\n");
+                message.push_str(&format!("  {binary}"));
             }
+            message
+        }
+
+        /// Clear any stale health, reload the agent, then confirm
+        /// it actually started remapping keys.
+        fn reload_and_verify(plist: &Path) -> Result<(), String> {
+            clear_health();
+            launchctl_quiet(&["bootout", &service_target()]);
+            launchctl_quiet(&["enable", &service_target()]);
+            launchctl(&["bootstrap", &domain_target(), path_to_str(plist)?])?;
+            verify_ready()
         }
 
         pub fn start() -> Result<(), String> {
@@ -543,19 +665,15 @@ mod macos {
                 runtime
             };
 
-            // Reload cleanly and clear any prior `disable` override so a manual
-            // start still works.
-            launchctl_quiet(&["bootout", &service_target()]);
-            launchctl_quiet(&["enable", &service_target()]);
-            launchctl(&["bootstrap", &domain_target(), path_to_str(&plist)?])?;
-            kickstart_or_confirm_loaded()?;
-
-            println!("{COMMAND_NAME} started in the background.");
+            let result = reload_and_verify(&plist);
+            match &result {
+                Ok(()) => println!("{COMMAND_NAME} started; key remapping is active now."),
+                Err(_) => println!("{COMMAND_NAME} was loaded, but it is NOT working yet."),
+            }
             if !enabled {
                 println!("It will NOT auto-start at login. Run `{COMMAND_NAME} enable` for that.");
             }
-            print_permission_hint();
-            Ok(())
+            result
         }
 
         pub fn enable() -> Result<(), String> {
@@ -564,40 +682,52 @@ mod macos {
             let plist = launch_agents_plist()?;
             write_plist_to(&plist)?;
 
-            launchctl_quiet(&["bootout", &service_target()]);
-            launchctl_quiet(&["enable", &service_target()]);
-            launchctl(&["bootstrap", &domain_target(), path_to_str(&plist)?])?;
-            kickstart_or_confirm_loaded()?;
-
-            println!("{COMMAND_NAME} enabled: it will auto-start at login and is running now.");
-            print_permission_hint();
-            Ok(())
+            let result = reload_and_verify(&plist);
+            match &result {
+                Ok(()) => println!(
+                    "{COMMAND_NAME} enabled: it will auto-start at login and key remapping is active now."
+                ),
+                Err(_) => println!(
+                    "{COMMAND_NAME} enabled: it will auto-start at login, but it is NOT working yet."
+                ),
+            }
+            result
         }
 
         pub fn stop() -> Result<(), String> {
             if !is_loaded() {
+                clear_health();
                 println!("{COMMAND_NAME} is not running.");
                 return Ok(());
             }
             launchctl(&["bootout", &service_target()])?;
+            clear_health();
             println!("{COMMAND_NAME} stopped.");
             Ok(())
         }
 
         pub fn restart() -> Result<(), String> {
-            if is_loaded() {
-                kickstart_or_confirm_loaded()?;
-                println!("{COMMAND_NAME} restarted.");
-                Ok(())
+            let plist = if launch_agents_plist()?.exists() {
+                launch_agents_plist()?
+            } else if runtime_plist()?.exists() {
+                runtime_plist()?
             } else {
                 println!("{COMMAND_NAME} was not running; starting it...");
-                start()
+                return start();
+            };
+
+            let result = reload_and_verify(&plist);
+            match &result {
+                Ok(()) => println!("{COMMAND_NAME} restarted; key remapping is active now."),
+                Err(_) => println!("{COMMAND_NAME} restarted, but it is NOT working yet."),
             }
+            result
         }
 
         pub fn disable() -> Result<(), String> {
             launchctl_quiet(&["bootout", &service_target()]);
             launchctl_quiet(&["disable", &service_target()]);
+            clear_health();
 
             let launch_agents = launch_agents_plist()?;
             if launch_agents.exists() {
@@ -626,7 +756,20 @@ mod macos {
                     "no"
                 }
             );
-            println!("running: {}", if is_loaded() { "yes" } else { "no" });
+            let loaded = is_loaded();
+            println!("running: {}", if loaded { "yes" } else { "no" });
+            println!(
+                "key remapping: {}",
+                if loaded {
+                    match read_health() {
+                        Some(Health::Ok) => "active",
+                        Some(Health::TapFailed) => "not active (permission needed)",
+                        None => "unknown",
+                    }
+                } else {
+                    "not active (not running)"
+                }
+            );
             println!(
                 "accessibility: {}",
                 if super::accessibility_is_trusted() {
@@ -994,6 +1137,21 @@ NOTES:
                     String::from_utf8_lossy(&out.stderr)
                 );
             }
+        }
+
+        #[test]
+        fn parses_health_tokens() {
+            use service::Health;
+            assert!(matches!(
+                service::parse_health_token("ok 123 456\n"),
+                Some(Health::Ok)
+            ));
+            assert!(matches!(
+                service::parse_health_token("tap_failed 1 2"),
+                Some(Health::TapFailed)
+            ));
+            assert!(service::parse_health_token("").is_none());
+            assert!(service::parse_health_token("weird").is_none());
         }
     }
 }
