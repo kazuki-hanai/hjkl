@@ -56,6 +56,12 @@ if [ "$REMOVE_BINARY" -eq 1 ]; then
 		echo "Removing legacy binary $LEGACY_BINARY_PATH..."
 		rm -f "$LEGACY_BINARY_PATH"
 	fi
+	remaining=$(command -v "$APP_NAME" 2>/dev/null || true)
+	if [ -n "$remaining" ]; then
+		echo "warning: another '$APP_NAME' is still on PATH: $remaining" >&2
+		echo "         remove it manually if you did not intend to keep it." >&2
+	fi
+	echo "Done. If '$APP_NAME' still runs in this terminal, open a new one or run: hash -r"
 else
 	echo "Leaving binary in place: $BINARY_PATH (--keep-binary was used)."
 fi
