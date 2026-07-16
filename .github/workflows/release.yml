@@ -17,18 +17,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Verify tag is on main
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "error: tagged commit $GITHUB_SHA is not on origin/main; refusing to release" >&2
+          status="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" \
+            --jq '.status')"
+          echo "compare status: $status"
+          # "identical" means the tag points at main's tip; "behind" means the
+          # tagged commit is an ancestor of main. Anything else (ahead/diverged)
+          # means the tag is not on main, so refuse to release.
+          if [ "$status" != "identical" ] && [ "$status" != "behind" ]; then
+            echo "error: tagged commit ${GITHUB_SHA} is not on main (status: ${status}); refusing to release" >&2
             exit 1
           fi
 
