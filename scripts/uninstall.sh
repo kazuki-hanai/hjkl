@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Disable/stop the hjkl LaunchAgent and optionally remove the binary.
+# Disable/stop the hjkl LaunchAgent and remove the installed binary by default.
 # launchd handling is delegated to the binary's own `disable` subcommand.
 
 APP_NAME="hjkl"
@@ -15,21 +15,23 @@ LEGACY_BINARY_PATH=${LEGACY_BINARY_PATH:-"$BIN_DIR/$LEGACY_APP_NAME"}
 
 usage() {
 	cat <<USAGE_EOF
-Usage: scripts/uninstall.sh [--remove-binary]
+Usage: scripts/uninstall.sh [--keep-binary]
 
-Disable and stop the hjkl LaunchAgent.
+Disable and stop the hjkl LaunchAgent, then remove the installed binary.
 
 Options:
-  --remove-binary   Also remove the installed binary.
+  --keep-binary     Disable/stop only; leave the installed binary in place.
+  --remove-binary   Deprecated no-op; binary removal is now the default.
   -h, --help        Show this help.
 
 Environment overrides: PREFIX, BIN_DIR, BINARY_PATH, LEGACY_BINARY_PATH.
 USAGE_EOF
 }
 
-REMOVE_BINARY=0
+REMOVE_BINARY=1
 for arg in "$@"; do
 	case "$arg" in
+		--keep-binary) REMOVE_BINARY=0 ;;
 		--remove-binary) REMOVE_BINARY=1 ;;
 		-h|--help) usage; exit 0 ;;
 		*) echo "error: unknown option: $arg" >&2; exit 1 ;;
@@ -55,5 +57,5 @@ if [ "$REMOVE_BINARY" -eq 1 ]; then
 		rm -f "$LEGACY_BINARY_PATH"
 	fi
 else
-	echo "Leaving binary in place: $BINARY_PATH (use --remove-binary to remove)."
+	echo "Leaving binary in place: $BINARY_PATH (--keep-binary was used)."
 fi
