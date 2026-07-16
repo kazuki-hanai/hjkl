@@ -29,7 +29,10 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Validate LaunchAgent template and scripts
-        run: |
-          plutil -lint launchd/com.kazuki-hanai.hjkl-for-mac.plist.template
-          sh -n scripts/install-launch-agent.sh scripts/uninstall-launch-agent.sh
+      - name: Check install scripts
+        run: >
+          sh -n
+          scripts/install.sh
+          scripts/uninstall.sh
+          scripts/install-launch-agent.sh
+          scripts/uninstall-launch-agent.sh
