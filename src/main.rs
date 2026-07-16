@@ -486,6 +486,7 @@ mod macos {
         /// Ground-truth signal written by the launchd-run daemon itself, so the
         /// management commands report whether keys are really being remapped
         /// rather than merely whether launchd loaded the job.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum Health {
             Ok,
             TapFailed,
@@ -524,18 +525,42 @@ mod macos {
             }
         }
 
-        pub fn parse_health_token(contents: &str) -> Option<Health> {
-            match contents.split_whitespace().next()? {
-                "ok" => Some(Health::Ok),
-                "tap_failed" => Some(Health::TapFailed),
-                _ => None,
+        pub fn parse_health_record(contents: &str) -> Option<(Health, u32)> {
+            let mut parts = contents.split_whitespace();
+            let status = match parts.next()? {
+                "ok" => Health::Ok,
+                "tap_failed" => Health::TapFailed,
+                _ => return None,
+            };
+            let pid = parts.next()?.parse().ok()?;
+            Some((status, pid))
+        }
+
+        fn current_service_pid() -> Option<u32> {
+            let output = SysCommand::new("launchctl")
+                .args(["print", &service_target()])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
             }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.lines().find_map(|line| {
+                line.trim()
+                    .strip_prefix("pid = ")
+                    .and_then(|pid| pid.parse().ok())
+            })
         }
 
         fn read_health() -> Option<Health> {
             let path = health_path().ok()?;
             let contents = fs::read_to_string(path).ok()?;
-            parse_health_token(&contents)
+            let (health, pid) = parse_health_record(&contents)?;
+            if current_service_pid() == Some(pid) {
+                Some(health)
+            } else {
+                None
+            }
         }
 
         fn launchctl(args: &[&str]) -> Result<(), String> {
@@ -880,10 +905,11 @@ NOTES:
                 state.mapped_keys_down &= !key_bit;
             }
 
-            let arrow_key = hjkl_to_arrow(key_code).expect("hjkl bit must have arrow mapping");
-            drop(state);
-            rewrite_as_arrow(event, arrow_key);
-            return event;
+            if let Some(arrow_key) = hjkl_to_arrow(key_code) {
+                drop(state);
+                rewrite_as_arrow(event, arrow_key);
+                return event;
+            }
         }
 
         match (event_type, key_code) {
@@ -1140,18 +1166,20 @@ NOTES:
         }
 
         #[test]
-        fn parses_health_tokens() {
+        fn parses_health_records() {
             use service::Health;
-            assert!(matches!(
-                service::parse_health_token("ok 123 456\n"),
-                Some(Health::Ok)
-            ));
-            assert!(matches!(
-                service::parse_health_token("tap_failed 1 2"),
-                Some(Health::TapFailed)
-            ));
-            assert!(service::parse_health_token("").is_none());
-            assert!(service::parse_health_token("weird").is_none());
+            assert_eq!(
+                service::parse_health_record("ok 123 456\n"),
+                Some((Health::Ok, 123))
+            );
+            assert_eq!(
+                service::parse_health_record("tap_failed 7 8"),
+                Some((Health::TapFailed, 7))
+            );
+            assert!(service::parse_health_record("").is_none());
+            assert!(service::parse_health_record("weird").is_none());
+            assert!(service::parse_health_record("ok").is_none());
+            assert!(service::parse_health_record("ok nope 123").is_none());
         }
     }
 }
