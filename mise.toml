@@ -1,0 +1,37 @@
+# Single source of truth for the toolchain and project commands.
+# Run `mise tasks` to list, `mise run <task>` to invoke. CI runs `mise run ci`.
+
+[tools]
+rust = "stable"
+
+[tasks.fmt]
+description = "Format the code"
+run = "cargo fmt"
+
+[tasks.fmt-check]
+description = "Check formatting"
+run = "cargo fmt --check"
+
+[tasks.lint]
+description = "Run clippy with warnings as errors"
+run = "cargo clippy --locked --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run the test suite"
+run = "cargo test --locked"
+
+[tasks.build]
+description = "Build the release binary"
+run = "cargo build --locked --release"
+
+[tasks.package]
+description = "Check crate packaging metadata"
+run = "cargo package --locked"
+
+[tasks.scripts-check]
+description = "Syntax-check the install/uninstall scripts"
+run = "sh -n scripts/install.sh scripts/uninstall.sh scripts/install-launch-agent.sh scripts/uninstall-launch-agent.sh"
+
+[tasks.ci]
+description = "Run everything CI runs"
+depends = ["fmt-check", "lint", "test", "build", "package", "scripts-check"]
