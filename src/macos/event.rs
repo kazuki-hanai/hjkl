@@ -56,6 +56,15 @@ pub(crate) fn add_command_flag(event: CGEventRef) {
     }
 }
 
+/// Clear the given modifier flag bits from the event. Used when a modifier key
+/// serves as the layer key, so its still-held physical flag does not ride on
+/// the arrow / command events the layer produces.
+pub(crate) fn clear_flags(event: CGEventRef, mask: CGEventFlags) {
+    unsafe {
+        CGEventSetFlags(event, CGEventGetFlags(event) & !mask);
+    }
+}
+
 /// Post a full key press (down + up) as this process, tagged so our own tap
 /// ignores it.
 pub(crate) fn post_key(key_code: CGKeyCode, flags: CGEventFlags) {
