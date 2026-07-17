@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::cli::COMMAND_NAME;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::macos::event;
 use crate::macos::ffi::{
     CFMachPortCreateRunLoopSource, CFMachPortRef, CFRelease, CFRunLoopAddSource,
@@ -39,7 +39,9 @@ pub(crate) fn run_event_loop(service_mode: bool) -> Result<()> {
         unsafe {
             CFRelease(tap.cast());
         }
-        return Err("Failed to create a run loop source for the event tap.".into());
+        return Err(Error::from(
+            "Failed to create a run loop source for the event tap.",
+        ));
     }
 
     unsafe {
@@ -99,7 +101,7 @@ fn create_event_tap(mask: CGEventMask, retry_until_available: bool) -> Result<CF
         service::write_health(service::Health::TapFailed);
 
         if !retry_until_available {
-            return Err(event_tap_permission_error().into());
+            return Err(Error::from(event_tap_permission_error()));
         }
 
         eprintln!(

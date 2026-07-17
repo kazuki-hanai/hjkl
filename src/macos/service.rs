@@ -38,21 +38,28 @@ fn home_dir() -> Result<PathBuf> {
         .ok_or_else(|| Error::from("HOME environment variable is not set"))
 }
 
+/// Directory for runtime state that is not user-facing: the runtime plist
+/// and the daemon health file.
+fn app_support_dir() -> Result<PathBuf> {
+    Ok(home_dir()?.join("Library/Application Support").join(LABEL))
+}
+
+fn plist_file_name() -> String {
+    format!("{LABEL}.plist")
+}
+
 /// Plist under `~/Library/LaunchAgents`. Its mere presence there is what
 /// makes launchd auto-load the agent at login, i.e. "enabled".
 fn launch_agents_plist() -> Result<PathBuf> {
     Ok(home_dir()?
         .join("Library/LaunchAgents")
-        .join(format!("{LABEL}.plist")))
+        .join(plist_file_name()))
 }
 
 /// Plist used by `start` when the agent is not enabled. It lives outside
 /// `LaunchAgents` so launchd runs it now but not automatically at login.
 fn runtime_plist() -> Result<PathBuf> {
-    Ok(home_dir()?
-        .join("Library/Application Support")
-        .join(LABEL)
-        .join(format!("{LABEL}.plist")))
+    Ok(app_support_dir()?.join(plist_file_name()))
 }
 
 fn log_paths() -> Result<(PathBuf, PathBuf)> {
@@ -62,7 +69,7 @@ fn log_paths() -> Result<(PathBuf, PathBuf)> {
 
 fn binary_path() -> Result<PathBuf> {
     let exe = std::env::current_exe()
-        .map_err(|error| format!("failed to resolve current executable: {error}"))?;
+        .map_err(|error| Error::from(format!("failed to resolve current executable: {error}")))?;
     Ok(exe.canonicalize().unwrap_or(exe))
 }
 
@@ -118,8 +125,9 @@ pub(crate) fn render_plist() -> Result<String> {
 
 fn write_plist_to(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|error| {
+            Error::from(format!("failed to create {}: {error}", parent.display()))
+        })?;
     }
     let contents = render_plist()?;
     fs::write(path, contents)
@@ -130,7 +138,7 @@ fn ensure_log_dir() -> Result<()> {
     let (stdout_log, _) = log_paths()?;
     if let Some(dir) = stdout_log.parent() {
         fs::create_dir_all(dir)
-            .map_err(|error| format!("failed to create {}: {error}", dir.display()))?;
+            .map_err(|error| Error::from(format!("failed to create {}: {error}", dir.display())))?;
     }
     Ok(())
 }
@@ -145,10 +153,7 @@ pub(crate) enum Health {
 }
 
 fn health_path() -> Result<PathBuf> {
-    Ok(home_dir()?
-        .join("Library/Application Support")
-        .join(LABEL)
-        .join("health"))
+    Ok(app_support_dir()?.join("health"))
 }
 
 /// Best-effort: recording health must never break the daemon.
@@ -219,7 +224,7 @@ fn launchctl(args: &[&str]) -> Result<()> {
     let status = SysCommand::new("launchctl")
         .args(args)
         .status()
-        .map_err(|error| format!("failed to run launchctl: {error}"))?;
+        .map_err(|error| Error::from(format!("failed to run launchctl: {error}")))?;
     if status.success() {
         Ok(())
     } else {
@@ -263,7 +268,7 @@ fn verify_ready() -> Result<()> {
     loop {
         match read_health() {
             Some(Health::Ok) => return Ok(()),
-            Some(Health::TapFailed) => return Err(not_ready_message().into()),
+            Some(Health::TapFailed) => return Err(Error::from(not_ready_message())),
             None => {}
         }
 

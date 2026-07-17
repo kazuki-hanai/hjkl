@@ -3,6 +3,7 @@
 use std::ffi::c_void;
 use std::ptr;
 
+use crate::cli::COMMAND_NAME;
 use crate::error::Result;
 use crate::macos::ffi::{
     AXIsProcessTrusted, AXIsProcessTrustedWithOptions, CFDictionaryCreate, CFRelease,
@@ -50,14 +51,14 @@ pub(crate) fn request_permissions() -> Result<()> {
     if trusted {
         println!("Accessibility permission is already granted.");
     } else {
-        println!("Requested Accessibility permission for hjkl.");
-        println!("If macOS opened System Settings, enable hjkl there.");
-        println!("If hjkl is not listed, add this binary manually:");
+        println!("Requested Accessibility permission for {COMMAND_NAME}.");
+        println!("If macOS opened System Settings, enable {COMMAND_NAME} there.");
+        println!("If {COMMAND_NAME} is not listed, add this binary manually:");
         match std::env::current_exe() {
             Ok(path) => println!("  {}", path.display()),
-            Err(_) => println!("  ~/.local/bin/hjkl"),
+            Err(_) => println!("  ~/.local/bin/{COMMAND_NAME}"),
         }
-        println!("Then run `hjkl restart`.");
+        println!("Then run `{COMMAND_NAME} restart`.");
     }
     Ok(())
 }
