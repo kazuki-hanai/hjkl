@@ -3,8 +3,9 @@
 
 use std::ffi::c_void;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU16, Ordering};
 
-use crate::keymap::{Action, KEY_SEMICOLON, KeyDirection, LayerState};
+use crate::keymap::{Action, DEFAULT_LAYER_KEY, KeyCode, KeyDirection, LayerState};
 use crate::macos::event;
 use crate::macos::event_tap;
 use crate::macos::ffi::{
@@ -13,6 +14,15 @@ use crate::macos::ffi::{
 };
 
 static STATE: Mutex<LayerState> = Mutex::new(LayerState::new());
+
+/// The configured layer ("super") key. Set once at daemon startup before the
+/// event loop begins, then only read from the callback.
+static LAYER_KEY: AtomicU16 = AtomicU16::new(DEFAULT_LAYER_KEY);
+
+/// Configure which key acts as the layer key. Call before `run_event_loop`.
+pub(crate) fn set_layer_key(key_code: KeyCode) {
+    LAYER_KEY.store(key_code, Ordering::SeqCst);
+}
 
 pub(crate) unsafe extern "C" fn event_callback(
     _proxy: CGEventTapProxy,
@@ -47,8 +57,10 @@ pub(crate) unsafe extern "C" fn event_callback(
     }
     let key_code = key_code as CGKeyCode;
 
+    let layer_key = LAYER_KEY.load(Ordering::SeqCst);
+
     let action = match STATE.lock() {
-        Ok(mut state) => state.on_key(direction, key_code, event::flags(event)),
+        Ok(mut state) => state.on_key(layer_key, direction, key_code, event::flags(event)),
         Err(_) => return event,
     };
 
@@ -59,8 +71,8 @@ pub(crate) unsafe extern "C" fn event_callback(
             event::rewrite_as_arrow(event, arrow_key);
             event
         }
-        Action::PostSemicolonAndSuppress(flags) => {
-            event::post_key(KEY_SEMICOLON, flags);
+        Action::PostLayerKeyAndSuppress(flags) => {
+            event::post_key(layer_key, flags);
             event::suppress()
         }
         Action::AddCommandFlag => {

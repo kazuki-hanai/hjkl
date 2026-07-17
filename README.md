@@ -145,6 +145,27 @@ hjkl --version
 
 `start` and `enable` run the remapper in the background through LaunchAgent. Internally, launchd manages a foreground process, so you should not normally run the internal launchd mode by hand.
 
+## Choosing the layer key
+
+By default the layer ("super") key is the semicolon `;`. Use `--layer-key` to pick a different key:
+
+```sh
+hjkl enable --layer-key quote     # use the ' key as the layer key
+hjkl run --layer-key grave        # foreground, using the ` key
+```
+
+`--layer-key` works with `run`, `start`, `restart`, and `enable`. When you set it with `enable`/`start`, the choice is baked into the LaunchAgent, so it survives login and a plain `hjkl restart` keeps it (pass `--layer-key` again to change it). `hjkl status` shows the key currently in effect.
+
+The key may be a friendly name or a raw macOS virtual key code. Recognized names:
+
+```text
+semicolon  quote/apostrophe  grave/backtick  tab  return/enter  space
+escape  delete  backslash  leftbracket  rightbracket  comma  period
+slash  minus  equal
+```
+
+Modifier keys (Command, Option, Control, Shift, Caps Lock, Fn) cannot be used — this tool taps key press/release events, which modifiers do not produce — and `h`/`j`/`k`/`l` are reserved as the arrow targets.
+
 ## macOS permissions
 
 macOS must allow the binary to observe keyboard events. If permission is missing, the process can be loaded by launchd but the remapping will not work.

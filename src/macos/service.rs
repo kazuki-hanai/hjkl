@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cli::COMMAND_NAME;
 use crate::error::{Error, Result};
+use crate::keymap::{self, KeyCode};
 use crate::macos::accessibility;
 
 pub(crate) const LABEL: &str = "com.kazuki-hanai.hjkl-for-mac";
@@ -95,9 +96,17 @@ fn xml_escape(input: &str) -> String {
         .replace('>', "&gt;")
 }
 
-pub(crate) fn render_plist() -> Result<String> {
+pub(crate) fn render_plist(layer_key: Option<KeyCode>) -> Result<String> {
     let binary = binary_path()?;
     let (stdout_log, stderr_log) = log_paths()?;
+
+    // The daemon reads its layer key from its own argv, so bake it into the
+    // ProgramArguments when one is configured. A numeric code is canonical and
+    // needs no XML escaping.
+    let layer_key_args = match layer_key {
+        Some(code) => format!("\t\t<string>--layer-key</string>\n\t\t<string>{code}</string>\n"),
+        None => String::new(),
+    };
 
     Ok(format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -111,7 +120,7 @@ pub(crate) fn render_plist() -> Result<String> {
 \t\t<string>{binary}</string>\n\
 \t\t<string>run</string>\n\
 \t\t<string>--launchd</string>\n\
-\t</array>\n\
+{layer_key_args}\t</array>\n\
 \t<key>RunAtLoad</key>\n\
 \t<true/>\n\
 \t<key>KeepAlive</key>\n\
@@ -133,13 +142,49 @@ pub(crate) fn render_plist() -> Result<String> {
     ))
 }
 
-fn write_plist_to(path: &Path) -> Result<()> {
+/// Extract the `--layer-key <code>` baked into a plist's ProgramArguments, if
+/// present. Used to preserve the configured key across restarts.
+fn configured_layer_key(plist_contents: &str) -> Option<KeyCode> {
+    let mut values = plist_contents
+        .split("<string>")
+        .skip(1)
+        .filter_map(|chunk| chunk.split("</string>").next());
+    while let Some(value) = values.next() {
+        if value == "--layer-key" {
+            return values.next()?.trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// The layer key currently baked into a plist on disk, if the file exists and
+/// carries one.
+fn read_configured_layer_key(plist: &Path) -> Option<KeyCode> {
+    let contents = fs::read_to_string(plist).ok()?;
+    configured_layer_key(&contents)
+}
+
+/// Resolve the layer key to bake: an explicit `--layer-key` wins, otherwise
+/// keep whatever the existing plist already carried (so a plain `restart`
+/// preserves the configured key rather than resetting it to the default).
+fn resolve_layer_key(explicit: Option<KeyCode>, plist: &Path) -> Option<KeyCode> {
+    explicit.or_else(|| read_configured_layer_key(plist))
+}
+
+fn layer_key_label(key_code: KeyCode) -> String {
+    match keymap::layer_key_name(key_code) {
+        Some(name) => format!("{name} (keycode {key_code})"),
+        None => format!("keycode {key_code}"),
+    }
+}
+
+fn write_plist_to(path: &Path, layer_key: Option<KeyCode>) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             Error::from(format!("failed to create {}: {error}", parent.display()))
         })?;
     }
-    let contents = render_plist()?;
+    let contents = render_plist(layer_key)?;
     fs::write(path, contents)
         .map_err(|error| Error::from(format!("failed to write {}: {error}", path.display())))
 }
@@ -339,8 +384,8 @@ fn not_ready_message() -> String {
 /// The plist is always rewritten here rather than trusting whatever is on
 /// disk, so a plist pre-planted or tampered with by another same-user process
 /// cannot make `launchctl bootstrap` load an arbitrary launchd job.
-fn reload_and_verify(plist: &Path) -> Result<()> {
-    write_plist_to(plist)?;
+fn reload_and_verify(plist: &Path, layer_key: Option<KeyCode>) -> Result<()> {
+    write_plist_to(plist, layer_key)?;
     clear_health();
     launchctl_quiet(&["bootout", &service_target()]);
     launchctl_quiet(&["enable", &service_target()]);
@@ -348,7 +393,13 @@ fn reload_and_verify(plist: &Path) -> Result<()> {
     verify_ready()
 }
 
-pub(crate) fn start() -> Result<()> {
+fn print_layer_key(layer_key: Option<KeyCode>) {
+    if let Some(code) = layer_key {
+        println!("layer key: {}", layer_key_label(code));
+    }
+}
+
+pub(crate) fn start(layer_key: Option<KeyCode>) -> Result<()> {
     ensure_log_dir()?;
     let _ = accessibility::request_prompt();
 
@@ -360,25 +411,28 @@ pub(crate) fn start() -> Result<()> {
         runtime_plist()?
     };
 
-    let result = reload_and_verify(&plist);
+    let layer_key = resolve_layer_key(layer_key, &plist);
+    let result = reload_and_verify(&plist, layer_key);
     match &result {
         Ok(()) => println!("{COMMAND_NAME} started; key remapping is active now."),
         Err(_) => println!("{COMMAND_NAME} was loaded, but it is NOT working yet."),
     }
+    print_layer_key(layer_key);
     if !enabled {
         println!("It will NOT auto-start at login. Run `{COMMAND_NAME} enable` for that.");
     }
     result
 }
 
-pub(crate) fn enable() -> Result<()> {
+pub(crate) fn enable(layer_key: Option<KeyCode>) -> Result<()> {
     ensure_log_dir()?;
     let _ = accessibility::request_prompt();
 
     // reload_and_verify writes the plist; its presence under LaunchAgents is
     // what marks the agent "enabled" (auto-start at login).
     let plist = launch_agents_plist()?;
-    let result = reload_and_verify(&plist);
+    let layer_key = resolve_layer_key(layer_key, &plist);
+    let result = reload_and_verify(&plist, layer_key);
     match &result {
         Ok(()) => println!(
             "{COMMAND_NAME} enabled: it will auto-start at login and key remapping is active now."
@@ -387,6 +441,7 @@ pub(crate) fn enable() -> Result<()> {
             "{COMMAND_NAME} enabled: it will auto-start at login, but it is NOT working yet."
         ),
     }
+    print_layer_key(layer_key);
     result
 }
 
@@ -402,7 +457,7 @@ pub(crate) fn stop() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn restart() -> Result<()> {
+pub(crate) fn restart(layer_key: Option<KeyCode>) -> Result<()> {
     let _ = accessibility::request_prompt();
 
     let plist = if launch_agents_plist()?.exists() {
@@ -411,14 +466,16 @@ pub(crate) fn restart() -> Result<()> {
         runtime_plist()?
     } else {
         println!("{COMMAND_NAME} was not running; starting it...");
-        return start();
+        return start(layer_key);
     };
 
-    let result = reload_and_verify(&plist);
+    let layer_key = resolve_layer_key(layer_key, &plist);
+    let result = reload_and_verify(&plist, layer_key);
     match &result {
         Ok(()) => println!("{COMMAND_NAME} restarted; key remapping is active now."),
         Err(_) => println!("{COMMAND_NAME} restarted, but it is NOT working yet."),
     }
+    print_layer_key(layer_key);
     result
 }
 
@@ -448,7 +505,16 @@ pub(crate) fn status() -> Result<()> {
     let launch_agents = launch_agents_plist()?;
     let (stdout_log, stderr_log) = log_paths()?;
 
+    let configured_layer_key = read_configured_layer_key(&launch_agents)
+        .or_else(|| {
+            runtime_plist()
+                .ok()
+                .and_then(|p| read_configured_layer_key(&p))
+        })
+        .unwrap_or(keymap::DEFAULT_LAYER_KEY);
+
     println!("label:   {LABEL}");
+    println!("layer key: {}", layer_key_label(configured_layer_key));
     println!(
         "enabled: {}",
         if launch_agents.exists() {
@@ -500,7 +566,7 @@ mod tests {
 
     #[test]
     fn rendered_plist_has_expected_structure() {
-        let plist = render_plist().expect("plist should render");
+        let plist = render_plist(None).expect("plist should render");
         assert!(plist.contains("<key>Label</key>"));
         assert!(plist.contains(LABEL));
         assert!(plist.contains("<string>run</string>"));
@@ -508,28 +574,70 @@ mod tests {
         assert!(plist.contains("<key>RunAtLoad</key>"));
         assert!(plist.contains("<key>KeepAlive</key>"));
         assert!(plist.trim_start().starts_with("<?xml"));
+        // No layer key requested -> no --layer-key argument.
+        assert!(!plist.contains("--layer-key"));
+    }
+
+    #[test]
+    fn rendered_plist_bakes_layer_key_and_round_trips() {
+        let plist = render_plist(Some(39)).expect("plist should render");
+        assert!(plist.contains("<string>--layer-key</string>"));
+        assert!(plist.contains("<string>39</string>"));
+        // The baked key must be readable back out for restart preservation.
+        assert_eq!(configured_layer_key(&plist), Some(39));
+        // A plist without the flag yields None.
+        let plain = render_plist(None).expect("plist should render");
+        assert_eq!(configured_layer_key(&plain), None);
     }
 
     #[test]
     fn rendered_plist_passes_plutil_lint() {
-        let plist = render_plist().expect("plist should render");
-        let path = std::env::temp_dir().join(format!("hjkl-test-{}.plist", std::process::id()));
-        std::fs::write(&path, plist).expect("write temp plist");
+        for layer_key in [None, Some(39)] {
+            let plist = render_plist(layer_key).expect("plist should render");
+            let path = std::env::temp_dir().join(format!(
+                "hjkl-test-{}-{:?}.plist",
+                std::process::id(),
+                layer_key
+            ));
+            std::fs::write(&path, plist).expect("write temp plist");
 
-        let output = std::process::Command::new("plutil")
-            .arg("-lint")
-            .arg(&path)
-            .output();
-        let _ = std::fs::remove_file(&path);
+            let output = std::process::Command::new("plutil")
+                .arg("-lint")
+                .arg(&path)
+                .output();
+            let _ = std::fs::remove_file(&path);
 
-        // plutil is macOS-only; skip silently where it is unavailable.
-        if let Ok(out) = output {
-            assert!(
-                out.status.success(),
-                "plutil -lint failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
+            // plutil is macOS-only; skip silently where it is unavailable.
+            if let Ok(out) = output {
+                assert!(
+                    out.status.success(),
+                    "plutil -lint failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
         }
+    }
+
+    #[test]
+    fn resolves_layer_key_preserving_existing_plist() {
+        let dir = std::env::temp_dir().join(format!("hjkl-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("test.plist");
+
+        // A plist carrying --layer-key 39 is read back and preserved.
+        std::fs::write(&path, render_plist(Some(39)).unwrap()).expect("write plist");
+        assert_eq!(read_configured_layer_key(&path), Some(39));
+        // An explicit choice overrides the baked one.
+        assert_eq!(resolve_layer_key(Some(50), &path), Some(50));
+        // No explicit choice preserves the baked one (a plain restart keeps it).
+        assert_eq!(resolve_layer_key(None, &path), Some(39));
+
+        // A plist without the flag has nothing to preserve.
+        std::fs::write(&path, render_plist(None).unwrap()).expect("write plist");
+        assert_eq!(resolve_layer_key(None, &path), None);
+        assert_eq!(resolve_layer_key(Some(48), &path), Some(48));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
