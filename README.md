@@ -31,10 +31,31 @@ The installer builds the release binary, copies it to `~/.local/bin/hjkl`, insta
 
 Tagged releases publish a macOS binary on the
 [Releases page](https://github.com/kazuki-hanai/hjkl-for-mac/releases). Download
-the `hjkl-<version>-macos-<arch>.tar.gz` archive, verify it against the
-`.sha256` file, extract it, and place `hjkl` on your `PATH` (for example in
-`~/.local/bin`). You still need to grant Accessibility permission as described
-below.
+the `hjkl-<version>-macos-<arch>.tar.gz` archive together with its `.sha256`
+file, then verify and extract it:
+
+```sh
+# Confirm the archive matches the published checksum.
+shasum -a 256 -c hjkl-<version>-macos-<arch>.tar.gz.sha256
+
+# Optional but stronger: verify the build provenance attestation signed by
+# the release workflow (requires the GitHub CLI).
+gh attestation verify hjkl-<version>-macos-<arch>.tar.gz \
+  --repo kazuki-hanai/hjkl-for-mac
+
+tar -xzf hjkl-<version>-macos-<arch>.tar.gz
+```
+
+Place the extracted `hjkl` on your `PATH` (for example in `~/.local/bin`). The
+binary is not code-signed or notarized, so on first launch Gatekeeper will
+warn; open it once via **System Settings → Privacy & Security → Open Anyway**
+rather than disabling Gatekeeper or clearing quarantine globally. You still
+need to grant Accessibility permission as described below.
+
+> **Note:** the `.sha256` file only proves the archive was not corrupted in
+> transit — it is published alongside the artifact, so it does not by itself
+> prove authenticity. The `gh attestation verify` step above is what ties the
+> binary to this repository's release workflow.
 
 Add `~/.local/bin` to your `PATH` if you want to run `hjkl` directly. If it is not on your `PATH`, use the full path instead:
 

@@ -32,10 +32,20 @@ fn domain_target() -> String {
 }
 
 fn home_dir() -> Result<PathBuf> {
-    std::env::var_os("HOME")
+    let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
-        .ok_or_else(|| Error::from("HOME environment variable is not set"))
+        .ok_or_else(|| Error::from("HOME environment variable is not set"))?;
+    // Every plist/launchctl path is derived from HOME and fed to launchd. A
+    // relative HOME would resolve those paths against the process's current
+    // directory, so require an absolute path before trusting it.
+    if !home.is_absolute() {
+        return Err(Error::from(format!(
+            "HOME must be an absolute path, got: {}",
+            home.display()
+        )));
+    }
+    Ok(home)
 }
 
 /// Directory for runtime state that is not user-facing: the runtime plist
@@ -323,9 +333,14 @@ fn not_ready_message() -> String {
     message
 }
 
-/// Clear any stale health, reload the agent, then confirm
-/// it actually started remapping keys.
+/// Re-render the plist from trusted internal state, clear any stale health,
+/// reload the agent, then confirm it actually started remapping keys.
+///
+/// The plist is always rewritten here rather than trusting whatever is on
+/// disk, so a plist pre-planted or tampered with by another same-user process
+/// cannot make `launchctl bootstrap` load an arbitrary launchd job.
 fn reload_and_verify(plist: &Path) -> Result<()> {
+    write_plist_to(plist)?;
     clear_health();
     launchctl_quiet(&["bootout", &service_target()]);
     launchctl_quiet(&["enable", &service_target()]);
@@ -342,9 +357,7 @@ pub(crate) fn start() -> Result<()> {
     let plist = if enabled {
         launch_agents
     } else {
-        let runtime = runtime_plist()?;
-        write_plist_to(&runtime)?;
-        runtime
+        runtime_plist()?
     };
 
     let result = reload_and_verify(&plist);
@@ -362,9 +375,9 @@ pub(crate) fn enable() -> Result<()> {
     ensure_log_dir()?;
     let _ = accessibility::request_prompt();
 
+    // reload_and_verify writes the plist; its presence under LaunchAgents is
+    // what marks the agent "enabled" (auto-start at login).
     let plist = launch_agents_plist()?;
-    write_plist_to(&plist)?;
-
     let result = reload_and_verify(&plist);
     match &result {
         Ok(()) => println!(
