@@ -115,6 +115,12 @@ pub(crate) fn modifier_device_flag(key_code: KeyCode) -> Option<EventFlags> {
 /// modifier key. When the modifier is the layer key, these are stripped from
 /// the events the layer emits so, e.g., `right_command + j` produces a bare
 /// Down arrow rather than Command+Down.
+///
+/// Limitation: the general mask (e.g. `COMMAND_FLAG_MASK`) is shared by the
+/// left and right key of the same modifier. If the user genuinely holds the
+/// opposite-side key of the same modifier while the layer is active, clearing
+/// the general bit also drops that key's contribution. This is a rare edge and
+/// accepted; the device bit still distinguishes the two physically.
 pub(crate) fn modifier_clear_mask(key_code: KeyCode) -> Option<EventFlags> {
     let device = modifier_device_flag(key_code)?;
     let general: EventFlags = match key_code {

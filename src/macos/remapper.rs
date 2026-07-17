@@ -93,7 +93,15 @@ pub(crate) unsafe extern "C" fn event_callback(
     let layer_modifier_mask = keymap::modifier_clear_mask(layer_key);
 
     match action {
-        Action::PassThrough => event,
+        Action::PassThrough => {
+            // Keep the layer modifier off every event delivered while it is
+            // held, matching the RewriteArrow/AddCommandFlag arms (no-op when
+            // the modifier is not actually held, since its bit is then absent).
+            if let Some(mask) = layer_modifier_mask {
+                event::clear_flags(event, mask);
+            }
+            event
+        }
         Action::Suppress => event::suppress(),
         Action::RewriteArrow(arrow_key) => {
             event::rewrite_as_arrow(event, arrow_key);
