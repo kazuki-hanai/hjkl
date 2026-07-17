@@ -18,13 +18,23 @@ SUBCOMMANDS:
     status         Show whether it is enabled/running and where files live.
     permissions    Ask macOS to show the Accessibility permission prompt.
 
-BEHAVIOR:
+OPTIONS:
+    --layer-key <key>   Use <key> as the layer (\"super\") key instead of the
+                        default semicolon. Accepts a name (semicolon, quote,
+                        grave, tab, return, space, ...) or a macOS key code.
+                        Valid for run/start/restart/enable; a plain restart
+                        keeps the previously configured key. Modifier keys and
+                        h/j/k/l are not allowed.
+
+BEHAVIOR (with the default layer key ';'):
     ;          -> ;     (when tapped by itself)
     ; + h      -> Left Arrow
     ; + j      -> Down Arrow
     ; + k      -> Up Arrow
     ; + l      -> Right Arrow
     ; + other  -> Command + other
+
+    With a different layer key, that key plays the role ';' has above.
 
 NOTES:
     The program must keep running to remap keys. `enable`/`start` do this in the
@@ -34,6 +44,7 @@ NOTES:
     background service process.
     macOS will require Accessibility permission for this binary. After granting
     it, run `hjkl restart`.
+    Example: `hjkl enable --layer-key quote` uses the quote key as the layer.
 "
     );
 }
