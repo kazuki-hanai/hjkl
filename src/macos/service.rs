@@ -15,6 +15,10 @@ use crate::macos::accessibility;
 
 pub(crate) const LABEL: &str = "com.kazuki-hanai.hjkl-for-mac";
 
+/// Absolute path to launchctl. Calling it by bare name would resolve through
+/// `PATH`, letting a shadowing binary run during service management.
+const LAUNCHCTL: &str = "/bin/launchctl";
+
 // getuid() lives in libSystem, which is always linked on macOS.
 unsafe extern "C" {
     fn getuid() -> u32;
@@ -249,7 +253,7 @@ pub(crate) fn parse_health_record(contents: &str) -> Option<(Health, u32)> {
 }
 
 fn current_service_pid() -> Option<u32> {
-    let output = SysCommand::new("launchctl")
+    let output = SysCommand::new(LAUNCHCTL)
         .args(["print", &service_target()])
         .output()
         .ok()?;
@@ -276,7 +280,7 @@ fn read_health() -> Option<Health> {
 }
 
 fn launchctl(args: &[&str]) -> Result<()> {
-    let status = SysCommand::new("launchctl")
+    let status = SysCommand::new(LAUNCHCTL)
         .args(args)
         .status()
         .map_err(|error| Error::from(format!("failed to run launchctl: {error}")))?;
@@ -295,7 +299,7 @@ fn launchctl(args: &[&str]) -> Result<()> {
 }
 
 fn launchctl_quiet(args: &[&str]) {
-    let _ = SysCommand::new("launchctl")
+    let _ = SysCommand::new(LAUNCHCTL)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -303,7 +307,7 @@ fn launchctl_quiet(args: &[&str]) {
 }
 
 fn is_loaded() -> bool {
-    SysCommand::new("launchctl")
+    SysCommand::new(LAUNCHCTL)
         .args(["print", &service_target()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())

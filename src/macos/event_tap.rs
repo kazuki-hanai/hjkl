@@ -41,6 +41,9 @@ pub(crate) fn run_event_loop(service_mode: bool) -> Result<()> {
 
     let source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), tap, 0) };
     if source.is_null() {
+        // Drop the dangling reference before freeing the port so reenable()
+        // can never call CGEventTapEnable on freed memory.
+        EVENT_TAP.store(ptr::null_mut(), Ordering::SeqCst);
         unsafe {
             CFRelease(tap.cast());
         }
@@ -65,6 +68,10 @@ pub(crate) fn run_event_loop(service_mode: bool) -> Result<()> {
 
     unsafe {
         CFRunLoopRun();
+        // The run loop has exited, so the callback can no longer fire. Clear
+        // the shared pointer before freeing the port so a late reenable()
+        // cannot dereference freed memory.
+        EVENT_TAP.store(ptr::null_mut(), Ordering::SeqCst);
         CFRelease(source.cast());
         CFRelease(tap.cast());
     }

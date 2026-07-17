@@ -11,7 +11,7 @@ use crate::macos::ffi::{
 };
 
 pub(crate) fn is_trusted() -> bool {
-    unsafe { AXIsProcessTrusted() }
+    unsafe { AXIsProcessTrusted() != 0 }
 }
 
 /// Ask macOS to show the Accessibility permission prompt for this process
@@ -38,7 +38,7 @@ pub(crate) fn request_prompt() -> bool {
         return is_trusted();
     }
 
-    let trusted = unsafe { AXIsProcessTrustedWithOptions(options) };
+    let trusted = unsafe { AXIsProcessTrustedWithOptions(options) != 0 };
     unsafe {
         CFRelease(options.cast());
     }
