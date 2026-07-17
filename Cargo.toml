@@ -1,6 +1,6 @@
 [package]
 name = "hjkl-for-mac"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Kazuki Hanai"]
 description = "A tiny macOS keyboard remapper that turns semicolon + hjkl into arrow keys."
