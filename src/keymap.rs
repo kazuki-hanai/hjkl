@@ -60,7 +60,7 @@ const LAYER_KEY_NAMES: &[(&str, KeyCode)] = &[
 const MODIFIER_KEY_CODES: &[KeyCode] = &[54, 55, 56, 57, 58, 59, 60, 61, 62, 63];
 
 /// Parse a user-supplied layer-key spec — either a friendly name
-/// (`semicolon`, `quote`, `caps_lock` …, case- and separator-insensitive) or a
+/// (`semicolon`, `quote`, `grave` …, case- and separator-insensitive) or a
 /// raw decimal macOS virtual key code — into a validated key code.
 pub(crate) fn parse_layer_key(spec: &str) -> Result<KeyCode, String> {
     let trimmed = spec.trim();
@@ -101,6 +101,15 @@ fn validate_layer_key(key_code: KeyCode) -> Result<(), String> {
         return Err(format!(
             "key code {key_code} is one of h/j/k/l, which the layer maps to arrow \
              keys and so cannot also be the layer key."
+        ));
+    }
+    if matches!(
+        key_code,
+        KEY_LEFT_ARROW | KEY_RIGHT_ARROW | KEY_DOWN_ARROW | KEY_UP_ARROW
+    ) {
+        return Err(format!(
+            "key code {key_code} is an arrow key that the layer emits, so it \
+             cannot also be the layer key."
         ));
     }
     Ok(())
@@ -497,6 +506,9 @@ mod tests {
         // h/j/k/l are arrow targets and cannot also be the layer key.
         assert!(parse_layer_key("4").is_err()); // h
         assert!(parse_layer_key("40").is_err()); // k
+        // The arrow keys the layer emits are rejected too.
+        assert!(parse_layer_key("123").is_err()); // left arrow
+        assert!(parse_layer_key("126").is_err()); // up arrow
     }
 
     #[test]
