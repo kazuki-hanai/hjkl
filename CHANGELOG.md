@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1]
+
+### Added
+- `--layer-key` to choose the layer ("super") key, by friendly name
+  (`semicolon`, `quote`, `grave`, `tab`, …) or macOS key code. Modifier keys
+  are supported with left/right distinction (`left_command`/`right_command`,
+  `left_option`/`right_option`, `left_control`/`right_control`,
+  `left_shift`/`right_shift`). Works with `run`/`start`/`restart`/`enable`,
+  is baked into the LaunchAgent, and is shown by `hjkl status`.
+
+### Changed
+- Split the monolithic `src/main.rs` into focused modules.
+- Manage the toolchain and project commands with [mise](https://mise.jdx.dev)
+  (`mise run ci`), used by both local development and CI.
+
+### Security
+- Pin all GitHub Actions to commit SHAs and add build-provenance attestation
+  to release artifacts (verifiable with `gh attestation verify`).
+- Re-render the LaunchAgent plist from trusted state before `launchctl
+  bootstrap`, and reject a non-absolute `HOME`.
+- Call `/bin/launchctl` by absolute path, return macOS `Boolean` as `u8` to
+  avoid undefined behavior, and clear the event-tap pointer before releasing
+  it.
+- Stop `install.sh --help` from executing a `hjkl` found on `PATH`.
+
+### Fixed
+- Keep `Cargo.lock` in sync with the crate version so `--locked` builds pass.
+
 ## [0.1.0]
 
 ### Added
@@ -17,5 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS CI workflow (fmt, clippy, test, build, package, script lint).
 - Release workflow that builds and publishes a macOS binary on `v*` tags.
 
-[Unreleased]: https://github.com/kazuki-hanai/hjkl-for-mac/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kazuki-hanai/hjkl-for-mac/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/kazuki-hanai/hjkl-for-mac/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/kazuki-hanai/hjkl-for-mac/releases/tag/v0.1.0
