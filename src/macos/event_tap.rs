@@ -12,8 +12,9 @@ use crate::macos::event;
 use crate::macos::ffi::{
     CFMachPortCreateRunLoopSource, CFMachPortRef, CFRelease, CFRunLoopAddSource,
     CFRunLoopGetCurrent, CFRunLoopRun, CGEventMask, CGEventTapCreate, CGEventTapEnable,
-    K_CG_EVENT_KEY_DOWN, K_CG_EVENT_KEY_UP, K_CG_EVENT_TAP_OPTION_DEFAULT,
-    K_CG_HEAD_INSERT_EVENT_TAP, K_CG_HID_EVENT_TAP, kCFRunLoopCommonModes,
+    K_CG_EVENT_FLAGS_CHANGED, K_CG_EVENT_KEY_DOWN, K_CG_EVENT_KEY_UP,
+    K_CG_EVENT_TAP_OPTION_DEFAULT, K_CG_HEAD_INSERT_EVENT_TAP, K_CG_HID_EVENT_TAP,
+    kCFRunLoopCommonModes,
 };
 use crate::macos::remapper;
 use crate::macos::service;
@@ -29,7 +30,11 @@ pub(crate) fn run_event_loop(service_mode: bool) -> Result<()> {
         );
     }
 
-    let mask = event::event_mask(K_CG_EVENT_KEY_DOWN) | event::event_mask(K_CG_EVENT_KEY_UP);
+    // flagsChanged is tapped so a modifier key can serve as the layer key; for
+    // a non-modifier layer key those events simply pass through.
+    let mask = event::event_mask(K_CG_EVENT_KEY_DOWN)
+        | event::event_mask(K_CG_EVENT_KEY_UP)
+        | event::event_mask(K_CG_EVENT_FLAGS_CHANGED);
     let tap = create_event_tap(mask, service_mode)?;
 
     EVENT_TAP.store(tap, Ordering::SeqCst);

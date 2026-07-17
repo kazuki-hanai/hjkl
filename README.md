@@ -150,8 +150,9 @@ hjkl --version
 By default the layer ("super") key is the semicolon `;`. Use `--layer-key` to pick a different key:
 
 ```sh
-hjkl enable --layer-key quote     # use the ' key as the layer key
-hjkl run --layer-key grave        # foreground, using the ` key
+hjkl enable --layer-key quote           # use the ' key as the layer key
+hjkl run --layer-key grave              # foreground, using the ` key
+hjkl enable --layer-key right_command   # use right Command as the layer key
 ```
 
 `--layer-key` works with `run`, `start`, `restart`, and `enable`. When you set it with `enable`/`start`, the choice is baked into the LaunchAgent, so it survives login and a plain `hjkl restart` keeps it (pass `--layer-key` again to change it). `hjkl status` shows the key currently in effect.
@@ -160,11 +161,17 @@ The key may be a friendly name or a raw macOS virtual key code. Recognized names
 
 ```text
 semicolon  quote/apostrophe  grave/backtick  tab  return/enter  space
-escape  delete  backslash  leftbracket  rightbracket  comma  period
+escape  delete  backslash  left_bracket  right_bracket  comma  period
 slash  minus  equal
+
+# modifier keys (left/right are distinct):
+left_command   right_command
+left_option    right_option    (also left_alt / right_alt)
+left_control   right_control   (also left_ctrl / right_ctrl)
+left_shift     right_shift
 ```
 
-Modifier keys (Command, Option, Control, Shift, Caps Lock, Fn) cannot be used — this tool taps key press/release events, which modifiers do not produce — and `h`/`j`/`k`/`l` are reserved as the arrow targets.
+A modifier used as the layer key is held to activate the layer and does nothing when tapped on its own. Caps Lock and Fn are not supported (special/toggle behavior), and `h`/`j`/`k`/`l` and the arrow keys are reserved as arrow targets.
 
 ## macOS permissions
 

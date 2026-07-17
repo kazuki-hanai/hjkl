@@ -29,9 +29,9 @@ pub(crate) const DEFAULT_LAYER_KEY: KeyCode = KEY_SEMICOLON;
 pub(crate) const COMMAND_FLAG_MASK: EventFlags = 1 << 20;
 
 /// Friendly names accepted for the layer key, paired with their macOS virtual
-/// key codes. Only non-modifier keys that emit real key-down/key-up events are
-/// listed, because the event tap does not observe modifier `flagsChanged`
-/// events. The first name for each code is the canonical one used for display.
+/// key codes. Both plain keys and modifier keys are listed. Names are matched
+/// case- and separator-insensitively (see [`normalize_key_name`]); the first
+/// entry for a given code is the canonical one used for display.
 const LAYER_KEY_NAMES: &[(&str, KeyCode)] = &[
     ("semicolon", 41),
     ("quote", 39),
@@ -45,56 +45,121 @@ const LAYER_KEY_NAMES: &[(&str, KeyCode)] = &[
     ("escape", 53),
     ("delete", 51),
     ("backslash", 42),
-    ("leftbracket", 33),
-    ("rightbracket", 30),
+    ("left_bracket", 33),
+    ("right_bracket", 30),
     ("comma", 43),
     ("period", 47),
     ("slash", 44),
     ("minus", 27),
     ("equal", 24),
+    // Modifier keys. Left/right are distinct physical keys with distinct
+    // codes; both are usable as the layer key.
+    ("left_command", 55),
+    ("right_command", 54),
+    ("left_option", 58),
+    ("right_option", 61),
+    ("left_alt", 58),
+    ("right_alt", 61),
+    ("left_control", 59),
+    ("right_control", 62),
+    ("left_ctrl", 59),
+    ("right_ctrl", 62),
+    ("left_shift", 56),
+    ("right_shift", 60),
 ];
 
-/// macOS virtual key codes for modifier keys. These only produce
-/// `flagsChanged` events (which this tool does not tap), so they cannot serve
-/// as the layer key and are rejected with a clear message.
-const MODIFIER_KEY_CODES: &[KeyCode] = &[54, 55, 56, 57, 58, 59, 60, 61, 62, 63];
+/// Modifier key codes usable as the layer key, paired with the
+/// device-dependent CGEvent flag bit that is set while that specific physical
+/// key is held. The device bit distinguishes left from right (unlike the
+/// general modifier masks) and lets us tell a `flagsChanged` down from an up.
+const MODIFIER_DEVICE_FLAGS: &[(KeyCode, EventFlags)] = &[
+    (55, 0x0000_0008), // left command  (NX_DEVICELCMDKEYMASK)
+    (54, 0x0000_0010), // right command (NX_DEVICERCMDKEYMASK)
+    (56, 0x0000_0002), // left shift     (NX_DEVICELSHIFTKEYMASK)
+    (60, 0x0000_0004), // right shift    (NX_DEVICERSHIFTKEYMASK)
+    (59, 0x0000_0001), // left control   (NX_DEVICELCTLKEYMASK)
+    (62, 0x0000_2000), // right control  (NX_DEVICERCTLKEYMASK)
+    (58, 0x0000_0020), // left option    (NX_DEVICELALTKEYMASK)
+    (61, 0x0000_0040), // right option   (NX_DEVICERALTKEYMASK)
+];
+
+/// Caps Lock (57) and Fn (63) are modifiers with special/toggle semantics that
+/// this tool does not support as a layer key.
+const UNSUPPORTED_MODIFIER_CODES: &[KeyCode] = &[57, 63];
+
+fn normalize_key_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| *c != '_' && *c != '-' && *c != ' ')
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Whether a key code is a modifier the layer machine drives via
+/// `flagsChanged` rather than key-down/up events.
+pub(crate) fn is_modifier(key_code: KeyCode) -> bool {
+    MODIFIER_DEVICE_FLAGS
+        .iter()
+        .any(|(code, _)| *code == key_code)
+}
+
+/// The device-dependent flag bit set while the given modifier key is held, if
+/// it is a supported modifier.
+pub(crate) fn modifier_device_flag(key_code: KeyCode) -> Option<EventFlags> {
+    MODIFIER_DEVICE_FLAGS
+        .iter()
+        .find(|(code, _)| *code == key_code)
+        .map(|(_, mask)| *mask)
+}
+
+/// All flag bits (general mask + device bit) contributed by holding the given
+/// modifier key. When the modifier is the layer key, these are stripped from
+/// the events the layer emits so, e.g., `right_command + j` produces a bare
+/// Down arrow rather than Command+Down.
+pub(crate) fn modifier_clear_mask(key_code: KeyCode) -> Option<EventFlags> {
+    let device = modifier_device_flag(key_code)?;
+    let general: EventFlags = match key_code {
+        55 | 54 => COMMAND_FLAG_MASK, // command  (1 << 20)
+        56 | 60 => 1 << 17,           // shift
+        58 | 61 => 1 << 19,           // option / alt
+        59 | 62 => 1 << 18,           // control
+        _ => 0,
+    };
+    Some(device | general)
+}
 
 /// Parse a user-supplied layer-key spec — either a friendly name
-/// (`semicolon`, `quote`, `grave` …, case- and separator-insensitive) or a
-/// raw decimal macOS virtual key code — into a validated key code.
+/// (`semicolon`, `quote`, `right_command` …, case- and separator-insensitive)
+/// or a raw decimal macOS virtual key code — into a validated key code.
 pub(crate) fn parse_layer_key(spec: &str) -> Result<KeyCode, String> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {
         return Err("layer key is empty".to_string());
     }
 
-    let normalized: String = trimmed
-        .chars()
-        .filter(|c| *c != '_' && *c != '-' && *c != ' ')
-        .flat_map(char::to_lowercase)
-        .collect();
+    let normalized = normalize_key_name(trimmed);
 
-    let key_code =
-        if let Some((_, code)) = LAYER_KEY_NAMES.iter().find(|(name, _)| *name == normalized) {
-            *code
-        } else if let Ok(code) = normalized.parse::<KeyCode>() {
-            code
-        } else {
-            return Err(format!(
-                "unknown layer key '{spec}'. Use a name like 'semicolon' or 'quote', \
-             or a numeric macOS key code."
-            ));
-        };
+    let key_code = if let Some((_, code)) = LAYER_KEY_NAMES
+        .iter()
+        .find(|(name, _)| normalize_key_name(name) == normalized)
+    {
+        *code
+    } else if let Ok(code) = normalized.parse::<KeyCode>() {
+        code
+    } else {
+        return Err(format!(
+            "unknown layer key '{spec}'. Use a name like 'semicolon', 'quote', or \
+             'right_command', or a numeric macOS key code."
+        ));
+    };
 
     validate_layer_key(key_code)?;
     Ok(key_code)
 }
 
 fn validate_layer_key(key_code: KeyCode) -> Result<(), String> {
-    if MODIFIER_KEY_CODES.contains(&key_code) {
+    if UNSUPPORTED_MODIFIER_CODES.contains(&key_code) {
         return Err(format!(
-            "key code {key_code} is a modifier key, which cannot be used as the \
-             layer key (modifier keys do not emit key events this tool observes)."
+            "key code {key_code} (Caps Lock/Fn) is not supported as the layer key."
         ));
     }
     if hjkl_key_bit(key_code).is_some() {
@@ -497,12 +562,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_modifier_layer_keys_with_left_right() {
+        assert_eq!(parse_layer_key("right_command"), Ok(54));
+        assert_eq!(parse_layer_key("left_command"), Ok(55));
+        assert_eq!(parse_layer_key("Right Option"), Ok(61));
+        assert_eq!(parse_layer_key("left-ctrl"), Ok(59));
+        assert_eq!(parse_layer_key("right_shift"), Ok(60));
+        // Numeric modifier codes are accepted too.
+        assert_eq!(parse_layer_key("54"), Ok(54));
+
+        assert!(is_modifier(54));
+        assert!(is_modifier(55));
+        assert!(!is_modifier(41)); // semicolon is not a modifier
+        // Left and right of the same modifier get distinct device flag bits.
+        assert_eq!(modifier_device_flag(55), Some(0x8)); // left command
+        assert_eq!(modifier_device_flag(54), Some(0x10)); // right command
+        assert_ne!(modifier_device_flag(55), modifier_device_flag(54));
+        assert_eq!(modifier_device_flag(41), None);
+    }
+
+    #[test]
+    fn modifier_clear_mask_includes_device_and_general_bits() {
+        // right command: device bit 0x10 + general command mask (1 << 20).
+        assert_eq!(modifier_clear_mask(54), Some(0x10 | COMMAND_FLAG_MASK));
+        // left shift: device bit 0x2 + general shift mask (1 << 17).
+        assert_eq!(modifier_clear_mask(56), Some(0x2 | (1 << 17)));
+        // Non-modifier keys contribute no mask.
+        assert_eq!(modifier_clear_mask(41), None);
+    }
+
+    #[test]
     fn rejects_invalid_layer_keys() {
         assert!(parse_layer_key("").is_err());
         assert!(parse_layer_key("not_a_key").is_err());
-        // Modifier keys have no key-down/up events for the tap to see.
+        // Caps Lock and Fn are unsupported modifiers.
         assert!(parse_layer_key("57").is_err()); // caps lock
-        assert!(parse_layer_key("55").is_err()); // command
+        assert!(parse_layer_key("63").is_err()); // fn
         // h/j/k/l are arrow targets and cannot also be the layer key.
         assert!(parse_layer_key("4").is_err()); // h
         assert!(parse_layer_key("40").is_err()); // k
@@ -515,6 +610,29 @@ mod tests {
     fn reports_canonical_key_names() {
         assert_eq!(layer_key_name(41), Some("semicolon"));
         assert_eq!(layer_key_name(39), Some("quote"));
+        assert_eq!(layer_key_name(54), Some("right_command"));
+        assert_eq!(layer_key_name(55), Some("left_command"));
         assert_eq!(layer_key_name(999), None);
+    }
+
+    #[test]
+    fn a_modifier_layer_key_drives_the_layer_like_any_other() {
+        // right_command as the layer key. The state machine itself is agnostic
+        // to modifier-ness; the caller derives direction from flagsChanged.
+        const RCMD: KeyCode = 54;
+        let mut state = LayerState::new();
+        assert_eq!(state.on_key(RCMD, Down, RCMD, NO_FLAGS), Suppress);
+        assert_eq!(
+            state.on_key(RCMD, Down, KEY_H, NO_FLAGS),
+            RewriteArrow(KEY_LEFT_ARROW)
+        );
+        assert_eq!(
+            state.on_key(RCMD, Up, KEY_H, NO_FLAGS),
+            RewriteArrow(KEY_LEFT_ARROW)
+        );
+        assert_eq!(state.on_key(RCMD, Up, RCMD, NO_FLAGS), Suppress);
+        // Used with a non-hjkl key it adds Command.
+        assert_eq!(state.on_key(RCMD, Down, RCMD, NO_FLAGS), Suppress);
+        assert_eq!(state.on_key(RCMD, Down, KEY_A, NO_FLAGS), AddCommandFlag);
     }
 }

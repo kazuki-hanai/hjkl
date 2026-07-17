@@ -20,10 +20,13 @@ SUBCOMMANDS:
 
 OPTIONS:
     --layer-key <key>   Use <key> as the layer (\"super\") key instead of the
-                        default semicolon. Accepts a name (semicolon, quote,
-                        grave, tab, return, space, ...) or a macOS key code.
+                        default semicolon. Accepts a key name or a macOS key
+                        code. Names include semicolon, quote, grave, tab,
+                        return, space, and the modifier keys left_command,
+                        right_command, left_option, right_option,
+                        left_control, right_control, left_shift, right_shift.
                         Valid for run/start/restart/enable; a plain restart
-                        keeps the previously configured key. Modifier keys and
+                        keeps the previously configured key. Caps Lock, Fn, and
                         h/j/k/l are not allowed.
 
 BEHAVIOR (with the default layer key ';'):

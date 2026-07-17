@@ -35,6 +35,9 @@ pub(crate) const K_CG_EVENT_TAP_OPTION_DEFAULT: u32 = 0;
 
 pub(crate) const K_CG_EVENT_KEY_DOWN: CGEventType = 10;
 pub(crate) const K_CG_EVENT_KEY_UP: CGEventType = 11;
+/// Emitted when a modifier key changes state (there is no key-down/up for
+/// modifiers). Needed to use a modifier key as the layer key.
+pub(crate) const K_CG_EVENT_FLAGS_CHANGED: CGEventType = 12;
 pub(crate) const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: CGEventType = 0xFFFF_FFFE;
 pub(crate) const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: CGEventType = 0xFFFF_FFFF;
 
