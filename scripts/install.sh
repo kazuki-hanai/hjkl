@@ -20,7 +20,7 @@ usage() {
 	cat <<USAGE_EOF
 Usage: scripts/install.sh [--no-build] [--no-enable]
 
-Build, install, and enable the `hjkl` command as a per-user LaunchAgent.
+Build, install, and enable the 'hjkl' command as a per-user LaunchAgent.
 
 Options:
   --no-build     Reuse target/release/$APP_NAME instead of building.

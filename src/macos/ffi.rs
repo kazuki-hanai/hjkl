@@ -1,8 +1,11 @@
 //! Raw FFI declarations for CoreFoundation and ApplicationServices.
 //!
 //! Nothing in this module should contain logic; it only mirrors the C API so
-//! the sibling modules can wrap it. `Boolean = bool` matches the current
-//! usage; auditing the exact CoreFoundation ABI is a tracked follow-up.
+//! the sibling modules can wrap it. `Boolean = bool` is used only for
+//! arguments (a Rust `bool` is a valid 0/1 byte). Darwin's `Boolean` is
+//! `unsigned char`, so functions that *return* one are declared `-> u8` and
+//! compared `!= 0`: materializing an out-of-range byte as a Rust `bool` would
+//! be undefined behavior.
 
 use std::ffi::c_void;
 use std::os::raw::c_long;
@@ -71,9 +74,9 @@ unsafe extern "C" {
         key_down: Boolean,
     ) -> CGEventRef;
     pub(crate) fn CGEventPost(tap: u32, event: CGEventRef);
-    pub(crate) fn AXIsProcessTrusted() -> Boolean;
+    pub(crate) fn AXIsProcessTrusted() -> u8;
     pub(crate) static kAXTrustedCheckOptionPrompt: CFStringRef;
-    pub(crate) fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> Boolean;
+    pub(crate) fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> u8;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
