@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to `hjkl-for-mac`.
+Thanks for your interest in contributing to `hjkl`.
 
 ## Development
 

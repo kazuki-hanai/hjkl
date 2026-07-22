@@ -1,6 +1,6 @@
 # Security Policy
 
-`hjkl-for-mac` is a local macOS and Windows utility that observes and rewrites
+`hjkl` is a local macOS and Windows utility that observes and rewrites
 keyboard events. macOS requires Accessibility permission; Windows uses a
 low-level keyboard hook in the current desktop session.
 
@@ -49,7 +49,7 @@ a result:
   the LaunchAgent at other code. This is the same capability such a process
   already has over your account, but because `hjkl` holds a standing
   Accessibility grant and auto-starts at login, treat write access to the
-  install path and `~/Library/LaunchAgents/com.kazuki-hanai.hjkl-for-mac.plist`
+  install path and `~/Library/LaunchAgents/com.kazuki-hanai.hjkl.plist`
   as security-relevant.
 - The management commands always re-render the LaunchAgent plist from the
   binary's own state before loading it, so a tampered on-disk plist cannot make

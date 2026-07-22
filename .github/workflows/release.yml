@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
           crate="$(cargo metadata --format-version 1 --no-deps \
-            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "hjkl-for-mac"))')"
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "hjkl"))')"
           echo "tag=$tag crate=$crate"
           if [ "$tag" != "$crate" ]; then
             echo "error: tag v$tag does not match Cargo.toml version $crate" >&2
@@ -114,7 +114,7 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME -replace "^v", ""
           $metadata = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
-          $crate = ($metadata.packages | Where-Object { $_.name -eq "hjkl-for-mac" }).version
+          $crate = ($metadata.packages | Where-Object { $_.name -eq "hjkl" }).version
           Write-Output "tag=$tag crate=$crate"
           if ($tag -ne $crate) {
             Write-Error "tag v$tag does not match Cargo.toml version $crate"

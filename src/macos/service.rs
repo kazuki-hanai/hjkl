@@ -13,7 +13,7 @@ use crate::error::{Error, Result};
 use crate::keymap::{self, KeyCode};
 use crate::macos::accessibility;
 
-pub(crate) const LABEL: &str = "com.kazuki-hanai.hjkl-for-mac";
+pub(crate) const LABEL: &str = "com.kazuki-hanai.hjkl";
 
 /// Absolute path to launchctl. Calling it by bare name would resolve through
 /// `PATH`, letting a shadowing binary run during service management.
@@ -30,6 +30,16 @@ fn uid() -> u32 {
 
 fn service_target() -> String {
     format!("gui/{}/{}", uid(), LABEL)
+}
+
+fn previous_label() -> String {
+    // Previous releases used a platform-specific suffix. Stop that job during
+    // upgrades so users do not end up with two event taps.
+    format!("{LABEL}-{}-{}", "for", "mac")
+}
+
+fn previous_service_target() -> String {
+    format!("gui/{}/{}", uid(), previous_label())
 }
 
 fn domain_target() -> String {
@@ -71,10 +81,23 @@ fn launch_agents_plist() -> Result<PathBuf> {
         .join(plist_file_name()))
 }
 
+fn previous_launch_agents_plist() -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", previous_label())))
+}
+
 /// Plist used by `start` when the agent is not enabled. It lives outside
 /// `LaunchAgents` so launchd runs it now but not automatically at login.
 fn runtime_plist() -> Result<PathBuf> {
     Ok(app_support_dir()?.join(plist_file_name()))
+}
+
+fn previous_runtime_plist() -> Result<PathBuf> {
+    Ok(home_dir()?
+        .join("Library/Application Support")
+        .join(previous_label())
+        .join(format!("{}.plist", previous_label())))
 }
 
 fn log_paths() -> Result<(PathBuf, PathBuf)> {
@@ -384,6 +407,7 @@ fn not_ready_message() -> String {
 fn reload_and_verify(plist: &Path, layer_key: Option<KeyCode>) -> Result<()> {
     write_plist_to(plist, layer_key)?;
     clear_health();
+    cleanup_previous_service();
     launchctl_quiet(&["bootout", &service_target()]);
     launchctl_quiet(&["enable", &service_target()]);
     launchctl(&["bootstrap", &domain_target(), path_to_str(plist)?])?;
@@ -443,6 +467,7 @@ pub(crate) fn enable(layer_key: Option<KeyCode>) -> Result<()> {
 }
 
 pub(crate) fn stop() -> Result<()> {
+    cleanup_previous_service();
     if !is_loaded() {
         clear_health();
         println!("{COMMAND_NAME} is not running.");
@@ -477,6 +502,7 @@ pub(crate) fn restart(layer_key: Option<KeyCode>) -> Result<()> {
 }
 
 pub(crate) fn disable() -> Result<()> {
+    cleanup_previous_service();
     launchctl_quiet(&["bootout", &service_target()]);
     launchctl_quiet(&["disable", &service_target()]);
     clear_health();
@@ -496,6 +522,18 @@ pub(crate) fn disable() -> Result<()> {
 
     println!("{COMMAND_NAME} disabled: it will not auto-start at login and is stopped.");
     Ok(())
+}
+
+fn cleanup_previous_service() {
+    let previous_target = previous_service_target();
+    launchctl_quiet(&["bootout", &previous_target]);
+    launchctl_quiet(&["disable", &previous_target]);
+    if let Ok(path) = previous_launch_agents_plist() {
+        let _ = fs::remove_file(path);
+    }
+    if let Ok(path) = previous_runtime_plist() {
+        let _ = fs::remove_file(path);
+    }
 }
 
 pub(crate) fn status() -> Result<()> {

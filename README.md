@@ -1,8 +1,8 @@
-# hjkl-for-mac
+# hjkl
 
 A small macOS and Windows keyboard remapper written in Rust. It recreates a semicolon-based Karabiner-Elements style layer without requiring Karabiner-Elements at runtime.
 
-`hjkl-for-mac` installs a `hjkl` command. On macOS it uses `CGEventTap` to observe and rewrite keyboard events. On Windows it uses a low-level keyboard hook plus `SendInput`.
+`hjkl` installs a `hjkl` command. On macOS it uses `CGEventTap` to observe and rewrite keyboard events. On Windows it uses a low-level keyboard hook plus `SendInput`.
 
 | Input | Output |
 | --- | --- |
@@ -53,7 +53,7 @@ hjkl start
 ### Prebuilt binary
 
 Tagged releases publish binaries on the
-[Releases page](https://github.com/kazuki-hanai/hjkl-for-mac/releases):
+[Releases page](https://github.com/kazuki-hanai/hjkl/releases):
 
 - macOS: `hjkl-<version>-macos-<arch>.tar.gz`
 - Windows: `hjkl-<version>-windows-x86_64.zip`
@@ -69,7 +69,7 @@ shasum -a 256 -c hjkl-<version>-macos-<arch>.tar.gz.sha256
 # Optional but stronger: verify the build provenance attestation signed by
 # the release workflow (requires the GitHub CLI).
 gh attestation verify hjkl-<version>-macos-<arch>.tar.gz \
-  --repo kazuki-hanai/hjkl-for-mac
+  --repo kazuki-hanai/hjkl
 
 tar -xzf hjkl-<version>-macos-<arch>.tar.gz
 ```
@@ -82,7 +82,7 @@ Get-FileHash .\hjkl-<version>-windows-x86_64.zip -Algorithm SHA256
 # Optional but stronger: verify the build provenance attestation signed by
 # the release workflow (requires the GitHub CLI).
 gh attestation verify .\hjkl-<version>-windows-x86_64.zip `
-  --repo kazuki-hanai/hjkl-for-mac
+  --repo kazuki-hanai/hjkl
 
 Expand-Archive .\hjkl-<version>-windows-x86_64.zip
 ```
@@ -160,8 +160,8 @@ Notes:
 - `enable` writes a plist under `~/Library/LaunchAgents` on macOS or a Task Scheduler logon task on Windows, starts the service now, and makes it auto-start on future logins.
 - `disable` removes that auto-start entry and stops the service.
 - `stop` only stops the current service. If the service is still enabled, it will start again on the next login.
-- The macOS launchd service target is `gui/<uid>/com.kazuki-hanai.hjkl-for-mac`.
-- The Windows scheduled task name is `hjkl-for-mac`.
+- The macOS launchd service target is `gui/<uid>/com.kazuki-hanai.hjkl`.
+- The Windows scheduled task name is `hjkl`.
 
 ## Run in the foreground
 

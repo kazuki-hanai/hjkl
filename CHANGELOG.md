@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-22
+
 ### Added
 - Windows support through a low-level keyboard hook and `SendInput`, including
   foreground `run`, background `start`, auto-start `enable` via Task Scheduler,
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Layer-key parsing now uses platform-specific key-code tables while keeping
   shared friendly names where possible.
+- Project, crate, repository links, service identifiers, and release metadata
+  now use the shorter `hjkl` name.
 - `; + other` is documented as the platform shortcut modifier: Command on
   macOS and Control on Windows.
 
@@ -59,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS CI workflow (fmt, clippy, test, build, package, script lint).
 - Release workflow that builds and publishes a macOS binary on `v*` tags.
 
-[Unreleased]: https://github.com/kazuki-hanai/hjkl-for-mac/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/kazuki-hanai/hjkl-for-mac/compare/v0.1.0...v0.2.1
-[0.1.0]: https://github.com/kazuki-hanai/hjkl-for-mac/releases/tag/v0.1.0
+[Unreleased]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kazuki-hanai/hjkl/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/kazuki-hanai/hjkl/compare/v0.1.0...v0.2.1
+[0.1.0]: https://github.com/kazuki-hanai/hjkl/releases/tag/v0.1.0
