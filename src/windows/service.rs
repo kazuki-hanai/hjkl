@@ -1,6 +1,7 @@
 //! Windows background-process and auto-start management.
 
 use std::fs;
+use std::io;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as SysCommand, Stdio};
@@ -41,8 +42,32 @@ fn local_app_data() -> Result<PathBuf> {
     Ok(path)
 }
 
+fn roaming_app_data() -> Result<PathBuf> {
+    let path = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| Error::from("APPDATA environment variable is not set"))?;
+    if !path.is_absolute() {
+        return Err(Error::from(format!(
+            "APPDATA must be an absolute path, got: {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
 fn app_data_dir() -> Result<PathBuf> {
     Ok(local_app_data()?.join(LABEL))
+}
+
+fn startup_script_path() -> Result<PathBuf> {
+    Ok(roaming_app_data()?
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Startup")
+        .join(format!("{TASK_NAME}.vbs")))
 }
 
 fn previous_task_name() -> String {
@@ -190,6 +215,16 @@ fn task_exists() -> bool {
         .unwrap_or(false)
 }
 
+fn startup_script_exists() -> bool {
+    startup_script_path()
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+fn auto_start_enabled() -> bool {
+    startup_script_exists() || task_exists()
+}
+
 fn schtasks(args: &[&str]) -> Result<()> {
     let status = SysCommand::new("schtasks")
         .args(args)
@@ -253,6 +288,17 @@ fn quote_windows_arg(arg: &str) -> String {
     quoted
 }
 
+fn vbs_string_literal(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn startup_script_contents(task_command: &str) -> String {
+    format!(
+        "Set shell = CreateObject(\"WScript.Shell\")\r\nshell.Run {}, 0, False\r\n",
+        vbs_string_literal(task_command)
+    )
+}
+
 fn task_command_line(binary: &Path, layer_key: Option<KeyCode>) -> Result<String> {
     let binary = binary
         .to_str()
@@ -262,26 +308,38 @@ fn task_command_line(binary: &Path, layer_key: Option<KeyCode>) -> Result<String
     Ok(parts.join(" "))
 }
 
-fn create_task(layer_key: Option<KeyCode>) -> Result<()> {
+fn write_startup_script(layer_key: Option<KeyCode>) -> Result<()> {
     let binary = binary_path()?;
     let task_command = task_command_line(&binary, layer_key)?;
-    let status = SysCommand::new("schtasks")
-        .args(["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON", "/TR"])
-        .arg(task_command)
-        .args(["/RL", "LIMITED", "/F"])
-        .status()
-        .map_err(|error| Error::from(format!("failed to run schtasks: {error}")))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(Error::from(format!(
-            "`schtasks /Create /TN {TASK_NAME} ...` failed ({})",
-            status
-                .code()
-                .map(|code| format!("exit code {code}"))
-                .unwrap_or_else(|| "terminated by signal".to_string()),
-        )))
+    let path = startup_script_path()?;
+    let Some(dir) = path.parent() else {
+        return Err(Error::from(format!(
+            "failed to resolve startup directory for {}",
+            path.display()
+        )));
+    };
+    fs::create_dir_all(dir)
+        .map_err(|error| Error::from(format!("failed to create {}: {error}", dir.display())))?;
+    fs::write(&path, startup_script_contents(&task_command))
+        .map_err(|error| Error::from(format!("failed to write {}: {error}", path.display())))
+}
+
+fn remove_startup_script() -> Result<()> {
+    let path = startup_script_path()?;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(Error::from(format!(
+            "failed to remove {}: {error}",
+            path.display()
+        ))),
     }
+}
+
+fn delete_scheduled_tasks_quiet() {
+    let previous = previous_task_name();
+    schtasks_quiet(&["/Delete", "/TN", &previous, "/F"]);
+    schtasks_quiet(&["/Delete", "/TN", TASK_NAME, "/F"]);
 }
 
 fn spawn_background(layer_key: Option<KeyCode>) -> Result<()> {
@@ -350,14 +408,15 @@ fn print_layer_key(layer_key: Option<KeyCode>) {
 pub(crate) fn start(layer_key: Option<KeyCode>) -> Result<()> {
     let layer_key = resolve_layer_key(layer_key);
     write_configured_layer_key(layer_key)?;
-    stop_running_process_quiet();
-
-    if task_exists() {
-        create_task(layer_key)?;
-        schtasks(&["/Run", "/TN", TASK_NAME])?;
-    } else {
-        spawn_background(layer_key)?;
+    let keep_auto_start = auto_start_enabled();
+    if keep_auto_start {
+        write_startup_script(layer_key)?;
     }
+    stop_running_process_quiet();
+    if keep_auto_start {
+        delete_scheduled_tasks_quiet();
+    }
+    spawn_background(layer_key)?;
 
     let result = verify_ready();
     match &result {
@@ -365,7 +424,7 @@ pub(crate) fn start(layer_key: Option<KeyCode>) -> Result<()> {
         Err(_) => println!("{COMMAND_NAME} was started, but it is NOT working yet."),
     }
     print_layer_key(layer_key);
-    if !task_exists() {
+    if !auto_start_enabled() {
         println!("It will NOT auto-start at login. Run `{COMMAND_NAME} enable` for that.");
     }
     result
@@ -374,9 +433,10 @@ pub(crate) fn start(layer_key: Option<KeyCode>) -> Result<()> {
 pub(crate) fn enable(layer_key: Option<KeyCode>) -> Result<()> {
     let layer_key = resolve_layer_key(layer_key);
     write_configured_layer_key(layer_key)?;
-    create_task(layer_key)?;
+    write_startup_script(layer_key)?;
     stop_running_process_quiet();
-    schtasks(&["/Run", "/TN", TASK_NAME])?;
+    delete_scheduled_tasks_quiet();
+    spawn_background(layer_key)?;
 
     let result = verify_ready();
     match &result {
@@ -420,6 +480,7 @@ pub(crate) fn restart(layer_key: Option<KeyCode>) -> Result<()> {
 
 pub(crate) fn disable() -> Result<()> {
     let _ = stop();
+    remove_startup_script()?;
     let previous = previous_task_name();
     schtasks_quiet(&["/Delete", "/TN", &previous, "/F"]);
     if task_exists() {
@@ -432,7 +493,9 @@ pub(crate) fn disable() -> Result<()> {
 
 pub(crate) fn status() -> Result<()> {
     let configured_layer_key = read_configured_layer_key().unwrap_or(keymap::DEFAULT_LAYER_KEY);
-    let enabled = task_exists();
+    let startup_script = startup_script_path()?;
+    let task_enabled = task_exists();
+    let enabled = startup_script.exists() || task_enabled;
     let health = read_health_record();
 
     println!("label:   {LABEL}");
@@ -458,7 +521,15 @@ pub(crate) fn status() -> Result<()> {
         }
     );
     println!("input access: available for the current desktop session");
-    println!("task:    {TASK_NAME}");
+    println!("startup: {}", startup_script.display());
+    println!(
+        "task:    {}",
+        if task_enabled {
+            format!("{TASK_NAME} (legacy scheduled task)")
+        } else {
+            "not installed".to_string()
+        }
+    );
     match binary_path() {
         Ok(binary) => println!("binary:  {}", binary.display()),
         Err(error) => println!("binary:  <unknown> ({error})"),
@@ -493,6 +564,15 @@ mod tests {
         assert_eq!(
             quote_windows_arg(r"C:\Program Files\hjkl\"),
             r#""C:\Program Files\hjkl\\""#
+        );
+    }
+
+    #[test]
+    fn quotes_vbs_string_literals_for_startup_script() {
+        assert_eq!(vbs_string_literal("simple"), "\"simple\"");
+        assert_eq!(
+            vbs_string_literal(r#""C:\Program Files\hjkl\hjkl.exe" run --service"#),
+            "\"\"\"C:\\Program Files\\hjkl\\hjkl.exe\"\" run --service\""
         );
     }
 }

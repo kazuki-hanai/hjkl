@@ -20,7 +20,7 @@ pub(crate) const SERVICE_MANAGER: &str = "per-user launchd LaunchAgent";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(crate) const SERVICE_MANAGER: &str = "background service";
 #[cfg(target_os = "windows")]
-pub(crate) const SERVICE_MANAGER: &str = "per-user Windows scheduled task";
+pub(crate) const SERVICE_MANAGER: &str = "per-user Windows startup entry";
 
 #[cfg(target_os = "macos")]
 pub(crate) const PERMISSIONS_NOTE: &str = "macOS will require Accessibility permission for this binary. After granting it, run `hjkl restart`.";
