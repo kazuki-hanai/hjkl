@@ -17,8 +17,8 @@ use windows_sys::Win32::System::Threading::{
     TerminateProcess, WaitForSingleObject,
 };
 
-pub(crate) const LABEL: &str = "com.kazuki-hanai.hjkl-for-mac";
-const TASK_NAME: &str = "hjkl-for-mac";
+pub(crate) const LABEL: &str = "com.kazuki-hanai.hjkl";
+const TASK_NAME: &str = "hjkl";
 const VERIFY_READY_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +43,12 @@ fn local_app_data() -> Result<PathBuf> {
 
 fn app_data_dir() -> Result<PathBuf> {
     Ok(local_app_data()?.join(LABEL))
+}
+
+fn previous_task_name() -> String {
+    // Previous releases used a platform-specific suffix. Stop that task during
+    // upgrades so users do not end up with two hooks.
+    format!("{TASK_NAME}-{}-{}", "for", "mac")
 }
 
 fn health_path() -> Result<PathBuf> {
@@ -297,6 +303,9 @@ fn spawn_background(layer_key: Option<KeyCode>) -> Result<()> {
 }
 
 fn stop_running_process_quiet() {
+    let previous = previous_task_name();
+    schtasks_quiet(&["/End", "/TN", &previous]);
+    schtasks_quiet(&["/Delete", "/TN", &previous, "/F"]);
     if task_exists() {
         schtasks_quiet(&["/End", "/TN", TASK_NAME]);
     }
@@ -383,6 +392,10 @@ pub(crate) fn enable(layer_key: Option<KeyCode>) -> Result<()> {
 }
 
 pub(crate) fn stop() -> Result<()> {
+    let previous = previous_task_name();
+    schtasks_quiet(&["/End", "/TN", &previous]);
+    schtasks_quiet(&["/Delete", "/TN", &previous, "/F"]);
+
     let running = read_health_record().is_some();
     if task_exists() {
         schtasks_quiet(&["/End", "/TN", TASK_NAME]);
@@ -407,6 +420,8 @@ pub(crate) fn restart(layer_key: Option<KeyCode>) -> Result<()> {
 
 pub(crate) fn disable() -> Result<()> {
     let _ = stop();
+    let previous = previous_task_name();
+    schtasks_quiet(&["/Delete", "/TN", &previous, "/F"]);
     if task_exists() {
         schtasks(&["/Delete", "/TN", TASK_NAME, "/F"])?;
     }

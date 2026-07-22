@@ -6,7 +6,6 @@ set -eu
 # the binary's own `enable` subcommand, so this script stays thin.
 
 APP_NAME="hjkl"
-LEGACY_APP_NAME="hjkl-for-mac"
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -14,7 +13,6 @@ REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 PREFIX=${PREFIX:-"$HOME/.local"}
 BIN_DIR=${BIN_DIR:-"$PREFIX/bin"}
 BINARY_PATH=${BINARY_PATH:-"$BIN_DIR/$APP_NAME"}
-LEGACY_BINARY_PATH=${LEGACY_BINARY_PATH:-"$BIN_DIR/$LEGACY_APP_NAME"}
 
 usage() {
 	cat <<USAGE_EOF
@@ -27,7 +25,7 @@ Options:
   --no-enable    Install the binary only; do not enable the macOS LaunchAgent.
   -h, --help     Show this help.
 
-Environment overrides: PREFIX, BIN_DIR, BINARY_PATH, LEGACY_BINARY_PATH.
+Environment overrides: PREFIX, BIN_DIR, BINARY_PATH.
 USAGE_EOF
 }
 
@@ -58,11 +56,6 @@ fi
 echo "Installing binary to $BINARY_PATH..."
 mkdir -p "$BIN_DIR"
 install -m 0755 "$SOURCE_BINARY" "$BINARY_PATH"
-
-if [ -e "$LEGACY_BINARY_PATH" ] && [ "$LEGACY_BINARY_PATH" != "$BINARY_PATH" ]; then
-	echo "Removing legacy binary $LEGACY_BINARY_PATH..."
-	rm -f "$LEGACY_BINARY_PATH"
-fi
 
 if [ "$ENABLE" -eq 1 ]; then
 	echo "Enabling LaunchAgent..."

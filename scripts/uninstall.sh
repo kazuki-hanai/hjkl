@@ -6,13 +6,11 @@ set -eu
 # subcommand.
 
 APP_NAME="hjkl"
-LEGACY_APP_NAME="hjkl-for-mac"
-LABEL="com.kazuki-hanai.hjkl-for-mac"
+LABEL="com.kazuki-hanai.hjkl"
 
 PREFIX=${PREFIX:-"$HOME/.local"}
 BIN_DIR=${BIN_DIR:-"$PREFIX/bin"}
 BINARY_PATH=${BINARY_PATH:-"$BIN_DIR/$APP_NAME"}
-LEGACY_BINARY_PATH=${LEGACY_BINARY_PATH:-"$BIN_DIR/$LEGACY_APP_NAME"}
 
 usage() {
 	cat <<USAGE_EOF
@@ -25,7 +23,7 @@ Options:
   --remove-binary   Deprecated no-op; binary removal is now the default.
   -h, --help        Show this help.
 
-Environment overrides: PREFIX, BIN_DIR, BINARY_PATH, LEGACY_BINARY_PATH.
+Environment overrides: PREFIX, BIN_DIR, BINARY_PATH.
 USAGE_EOF
 }
 
@@ -53,10 +51,6 @@ fi
 if [ "$REMOVE_BINARY" -eq 1 ]; then
 	echo "Removing binary $BINARY_PATH..."
 	rm -f "$BINARY_PATH"
-	if [ "$LEGACY_BINARY_PATH" != "$BINARY_PATH" ]; then
-		echo "Removing legacy binary $LEGACY_BINARY_PATH..."
-		rm -f "$LEGACY_BINARY_PATH"
-	fi
 	remaining=$(command -v "$APP_NAME" 2>/dev/null || true)
 	if [ -n "$remaining" ]; then
 		echo "warning: another '$APP_NAME' is still on PATH: $remaining" >&2

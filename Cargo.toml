@@ -1,10 +1,10 @@
 [package]
-name = "hjkl-for-mac"
-version = "0.2.1"
+name = "hjkl"
+version = "0.3.0"
 edition = "2024"
 authors = ["Kazuki Hanai"]
 description = "A tiny macOS and Windows keyboard remapper that turns semicolon + hjkl into arrow keys."
-repository = "https://github.com/kazuki-hanai/hjkl-for-mac"
+repository = "https://github.com/kazuki-hanai/hjkl"
 license = "MIT"
 readme = "README.md"
 keywords = ["macos", "windows", "keyboard", "remap", "hjkl"]
