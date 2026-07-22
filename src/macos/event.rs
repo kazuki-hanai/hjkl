@@ -50,9 +50,12 @@ pub(crate) fn rewrite_as_arrow(event: CGEventRef, arrow_key: CGKeyCode) {
     }
 }
 
-pub(crate) fn add_command_flag(event: CGEventRef) {
+pub(crate) fn add_shortcut_modifier_flag(event: CGEventRef) {
     unsafe {
-        CGEventSetFlags(event, keymap::with_command_flag(CGEventGetFlags(event)));
+        CGEventSetFlags(
+            event,
+            keymap::with_shortcut_modifier_flag(CGEventGetFlags(event)),
+        );
     }
 }
 

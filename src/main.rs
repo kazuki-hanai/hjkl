@@ -1,35 +1,29 @@
-//! A tiny macOS keyboard remapper:
+//! A tiny keyboard remapper:
 //!
 //! - tap `;` by itself -> `;`
 //! - hold `;` and press `h/j/k/l` -> left/down/up/right arrow
-//! - hold `;` and press another key -> Command + that key
+//! - hold `;` and press another key -> the platform shortcut modifier + that key
 //!
 //! This implements the same composed behavior as the original
 //! Karabiner-Elements setup without depending on Karabiner at runtime.
 
-#[cfg(target_os = "macos")]
 mod app;
-#[cfg(target_os = "macos")]
 mod cli;
-#[cfg(target_os = "macos")]
 mod error;
-#[cfg(target_os = "macos")]
 mod help;
-#[cfg(target_os = "macos")]
 mod keymap;
-#[cfg(target_os = "macos")]
-mod macos;
+mod platform;
 
 #[cfg(target_os = "macos")]
+mod macos;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+mod unsupported;
+#[cfg(target_os = "windows")]
+mod windows;
+
 fn main() {
     if let Err(error) = app::run() {
         eprintln!("{error}");
         std::process::exit(1);
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn main() {
-    eprintln!("hjkl only supports macOS.");
-    std::process::exit(1);
 }

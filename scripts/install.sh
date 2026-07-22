@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Build hjkl-for-mac, install the `hjkl` command, and enable it as a per-user
-# macOS LaunchAgent (auto-start at login). All launchd handling is done by
+# Build hjkl, install the `hjkl` command, and enable it as a per-user macOS
+# LaunchAgent (auto-start at login). All launchd handling is done by
 # the binary's own `enable` subcommand, so this script stays thin.
 
 APP_NAME="hjkl"
@@ -20,11 +20,11 @@ usage() {
 	cat <<USAGE_EOF
 Usage: scripts/install.sh [--no-build] [--no-enable]
 
-Build, install, and enable the 'hjkl' command as a per-user LaunchAgent.
+Build, install, and enable the 'hjkl' command as a per-user macOS LaunchAgent.
 
 Options:
   --no-build     Reuse target/release/$APP_NAME instead of building.
-  --no-enable    Install the binary only; do not enable the LaunchAgent.
+  --no-enable    Install the binary only; do not enable the macOS LaunchAgent.
   -h, --help     Show this help.
 
 Environment overrides: PREFIX, BIN_DIR, BINARY_PATH, LEGACY_BINARY_PATH.
@@ -42,7 +42,7 @@ for arg in "$@"; do
 	esac
 done
 
-[ "$(uname -s)" = "Darwin" ] || { echo "error: hjkl-for-mac only supports macOS" >&2; exit 1; }
+[ "$(uname -s)" = "Darwin" ] || { echo "error: scripts/install.sh is macOS-only; on Windows use the release zip or cargo build" >&2; exit 1; }
 [ "$(id -u)" -ne 0 ] || { echo "error: run as your login user, not root" >&2; exit 1; }
 
 SOURCE_BINARY="$REPO_DIR/target/release/$APP_NAME"

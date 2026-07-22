@@ -1,8 +1,8 @@
 # hjkl-for-mac
 
-A small macOS keyboard remapper written in Rust. It recreates a semicolon-based Karabiner-Elements style layer without requiring Karabiner-Elements at runtime.
+A small macOS and Windows keyboard remapper written in Rust. It recreates a semicolon-based Karabiner-Elements style layer without requiring Karabiner-Elements at runtime.
 
-`hjkl-for-mac` installs a `hjkl` command and uses macOS `CGEventTap` to observe and rewrite keyboard events.
+`hjkl-for-mac` installs a `hjkl` command. On macOS it uses `CGEventTap` to observe and rewrite keyboard events. On Windows it uses a low-level keyboard hook plus `SendInput`.
 
 | Input | Output |
 | --- | --- |
@@ -11,28 +11,56 @@ A small macOS keyboard remapper written in Rust. It recreates a semicolon-based 
 | Hold `;` and press `j` | Down Arrow |
 | Hold `;` and press `k` | Up Arrow |
 | Hold `;` and press `l` | Right Arrow |
-| Hold `;` and press any other key | `Command` + that key |
+| Hold `;` and press any other key | `Command` + that key on macOS, `Control` + that key on Windows |
 
 ## Requirements
 
-- macOS
+- macOS or Windows
 - Rust toolchain, only needed to build from source
 - macOS Accessibility permission for the installed binary
+- On Windows, run `hjkl` as administrator only if you need to remap administrator/elevated applications
 
 ## Quick start
+
+### macOS
 
 ```sh
 scripts/install.sh
 ```
 
-The installer builds the release binary, copies it to `~/.local/bin/hjkl`, installs a per-user LaunchAgent, and tries to start the service immediately.
+The macOS installer builds the release binary, copies it to `~/.local/bin/hjkl`, installs a per-user LaunchAgent, and tries to start the service immediately.
+
+### Windows
+
+Build from source:
+
+```powershell
+cargo build --release
+```
+
+Then put `target\release\hjkl.exe` somewhere on your `PATH` and enable it:
+
+```powershell
+hjkl enable
+```
+
+`enable` creates a per-user scheduled task that starts `hjkl` at login and starts the remapper immediately. To run without auto-start:
+
+```powershell
+hjkl start
+```
 
 ### Prebuilt binary
 
-Tagged releases publish a macOS binary on the
-[Releases page](https://github.com/kazuki-hanai/hjkl-for-mac/releases). Download
-the `hjkl-<version>-macos-<arch>.tar.gz` archive together with its `.sha256`
-file, then verify and extract it:
+Tagged releases publish binaries on the
+[Releases page](https://github.com/kazuki-hanai/hjkl-for-mac/releases):
+
+- macOS: `hjkl-<version>-macos-<arch>.tar.gz`
+- Windows: `hjkl-<version>-windows-x86_64.zip`
+
+Download the archive together with its `.sha256` file, then verify and extract it.
+
+macOS:
 
 ```sh
 # Confirm the archive matches the published checksum.
@@ -46,11 +74,20 @@ gh attestation verify hjkl-<version>-macos-<arch>.tar.gz \
 tar -xzf hjkl-<version>-macos-<arch>.tar.gz
 ```
 
-Place the extracted `hjkl` on your `PATH` (for example in `~/.local/bin`). The
-binary is not code-signed or notarized, so on first launch Gatekeeper will
-warn; open it once via **System Settings → Privacy & Security → Open Anyway**
-rather than disabling Gatekeeper or clearing quarantine globally. You still
-need to grant Accessibility permission as described below.
+Windows PowerShell:
+
+```powershell
+Get-FileHash .\hjkl-<version>-windows-x86_64.zip -Algorithm SHA256
+
+# Optional but stronger: verify the build provenance attestation signed by
+# the release workflow (requires the GitHub CLI).
+gh attestation verify .\hjkl-<version>-windows-x86_64.zip `
+  --repo kazuki-hanai/hjkl-for-mac
+
+Expand-Archive .\hjkl-<version>-windows-x86_64.zip
+```
+
+Place the extracted `hjkl`/`hjkl.exe` on your `PATH` (for example in `~/.local/bin` on macOS, or a tools directory on Windows). The macOS binary is not code-signed or notarized, so on first launch Gatekeeper will warn; open it once via **System Settings -> Privacy & Security -> Open Anyway** rather than disabling Gatekeeper or clearing quarantine globally. You still need to grant Accessibility permission on macOS as described below.
 
 > **Note:** the `.sha256` file only proves the archive was not corrupted in
 > transit — it is published alongside the artifact, so it does not by itself
@@ -63,7 +100,7 @@ Add `~/.local/bin` to your `PATH` if you want to run `hjkl` directly. If it is n
 ~/.local/bin/hjkl status
 ```
 
-After installation, grant Accessibility permission to this binary:
+On macOS, after installation, grant Accessibility permission to this binary:
 
 ```text
 ~/.local/bin/hjkl
@@ -89,7 +126,7 @@ Then restart the service:
 hjkl restart
 ```
 
-A healthy setup should show:
+A healthy macOS setup should show:
 
 ```text
 enabled: yes (auto-start at login)
@@ -100,7 +137,12 @@ accessibility: granted
 
 ## Service commands
 
-The `hjkl` binary manages its own per-user launchd LaunchAgent. You usually do not need to call `launchctl` directly.
+The `hjkl` binary manages its own per-user background process:
+
+- macOS: launchd LaunchAgent
+- Windows: Task Scheduler logon task
+
+You usually do not need to call `launchctl` or `schtasks` directly.
 
 ```sh
 hjkl start      # Start in the background now; do not enable auto-start at login.
@@ -109,16 +151,17 @@ hjkl restart    # Restart the background service.
 hjkl enable     # Enable auto-start at login and start now.
 hjkl disable    # Disable auto-start and stop now.
 hjkl status     # Show service state and file paths.
-hjkl permissions # Ask macOS to show the Accessibility permission prompt.
+hjkl permissions # Show platform-specific input permission guidance.
 ```
 
 Notes:
 
 - `start` starts the service now, but does not install it for future logins.
-- `enable` writes a plist under `~/Library/LaunchAgents`, starts the service now, and makes it auto-start on future logins.
-- `disable` removes the LaunchAgent plist and stops the service.
+- `enable` writes a plist under `~/Library/LaunchAgents` on macOS or a Task Scheduler logon task on Windows, starts the service now, and makes it auto-start on future logins.
+- `disable` removes that auto-start entry and stops the service.
 - `stop` only stops the current service. If the service is still enabled, it will start again on the next login.
-- The launchd service target is `gui/<uid>/com.kazuki-hanai.hjkl-for-mac`.
+- The macOS launchd service target is `gui/<uid>/com.kazuki-hanai.hjkl-for-mac`.
+- The Windows scheduled task name is `hjkl-for-mac`.
 
 ## Run in the foreground
 
@@ -143,7 +186,7 @@ hjkl --help
 hjkl --version
 ```
 
-`start` and `enable` run the remapper in the background through LaunchAgent. Internally, launchd manages a foreground process, so you should not normally run the internal launchd mode by hand.
+`start` and `enable` run the remapper in the background through the platform service manager. Internally, the service manager owns a foreground process, so you should not normally run the internal service mode by hand.
 
 ## Choosing the layer key
 
@@ -152,12 +195,12 @@ By default the layer ("super") key is the semicolon `;`. Use `--layer-key` to pi
 ```sh
 hjkl enable --layer-key quote           # use the ' key as the layer key
 hjkl run --layer-key grave              # foreground, using the ` key
-hjkl enable --layer-key right_command   # use right Command as the layer key
+hjkl enable --layer-key right_command   # use right Command/Windows as the layer key
 ```
 
-`--layer-key` works with `run`, `start`, `restart`, and `enable`. When you set it with `enable`/`start`, the choice is baked into the LaunchAgent, so it survives login and a plain `hjkl restart` keeps it (pass `--layer-key` again to change it). `hjkl status` shows the key currently in effect.
+`--layer-key` works with `run`, `start`, `restart`, and `enable`. When you set it with `enable`/`start`, the choice is saved into the platform service configuration, so it survives login and a plain `hjkl restart` keeps it (pass `--layer-key` again to change it). `hjkl status` shows the key currently in effect.
 
-The key may be a friendly name or a raw macOS virtual key code. Recognized names:
+The key may be a friendly name or a raw platform key code: macOS virtual key code on macOS, Windows virtual-key code on Windows. Recognized names:
 
 ```text
 semicolon  quote/apostrophe  grave/backtick  tab  return/enter  space
@@ -166,12 +209,13 @@ slash  minus  equal
 
 # modifier keys (left/right are distinct):
 left_command   right_command
+left_windows   right_windows  (also left_win / right_win on Windows)
 left_option    right_option    (also left_alt / right_alt)
 left_control   right_control   (also left_ctrl / right_ctrl)
 left_shift     right_shift
 ```
 
-A modifier used as the layer key is held to activate the layer and does nothing when tapped on its own. Caps Lock and Fn are not supported (special/toggle behavior), and `h`/`j`/`k`/`l` and the arrow keys are reserved as arrow targets.
+A modifier used as the layer key is held to activate the layer and does nothing when tapped on its own. Caps Lock and Fn-like special/toggle keys are not supported, and `h`/`j`/`k`/`l` and the arrow keys are reserved as arrow targets.
 
 ## macOS permissions
 
@@ -203,9 +247,15 @@ hjkl restart
 
 If Input Monitoring lists `hjkl`, allow it there too.
 
+## Windows input access
+
+Windows does not require an Accessibility-style permission prompt for the low-level keyboard hook. The normal user-level process can remap normal user-level applications.
+
+Windows integrity levels still apply: a non-administrator `hjkl.exe` generally cannot inject input into applications running as administrator. If remapping does not affect an elevated application, run `hjkl.exe` as administrator too.
+
 ## Troubleshooting
 
-### `enabled: yes` and `running: yes`, but keys do not remap
+### macOS: `enabled: yes` and `running: yes`, but keys do not remap
 
 Check:
 
@@ -229,32 +279,60 @@ hjkl restart
 
 This is intentional. These commands now fail if the service is loaded but key remapping is not actually active. Follow the error message, then run `hjkl restart` again.
 
-### Logs
+### macOS logs
 
 ```text
 ~/Library/Logs/hjkl.log
 ~/Library/Logs/hjkl.err.log
 ```
 
+### Windows status says not active
+
+Check:
+
+```powershell
+hjkl status
+```
+
+If `key remapping` is not active, restart the background process:
+
+```powershell
+hjkl restart
+```
+
+If remapping works in normal applications but not in an application running as administrator, start `hjkl.exe` as administrator as well.
+
 ## Uninstall
+
+macOS:
 
 ```sh
 scripts/uninstall.sh               # Disable auto-start, stop, and remove the binary.
 scripts/uninstall.sh --keep-binary # Disable/stop only; keep the installed binary.
 ```
 
+Windows:
+
+```powershell
+hjkl disable
+```
+
+Then remove `hjkl.exe` from wherever you installed it.
+
 ## Relation to the original Karabiner-Elements setup
 
 The original setup treated `;` as `right_command` when used with another key, then mapped `right_command + h/j/k/l` to arrow keys.
 
-This Rust implementation maps `; + h/j/k/l` directly to arrow keys. For other chords, it adds the `Command` modifier, so `; + c` behaves like `Command + c`.
+This Rust implementation maps `; + h/j/k/l` directly to arrow keys. For other chords, it adds the platform shortcut modifier, so `; + c` behaves like `Command + c` on macOS and `Control + c` on Windows.
 
 ## Power usage
 
 Power usage should be minimal. The implementation is event-driven, not polling-based.
 
 - `CFRunLoopRun()` sleeps until keyboard events arrive.
-- The event tap listens only to `keyDown` and `keyUp` events, not high-frequency mouse events.
+- Windows waits on the standard message loop until keyboard hook events arrive.
+- The macOS event tap listens only to `keyDown`, `keyUp`, and modifier `flagsChanged` events, not high-frequency mouse events.
+- The Windows hook listens only to low-level keyboard events, not mouse events.
 - Per-key work is limited to reading and rewriting a few event fields.
 
 In practice, it should be comparable to other always-on keyboard remappers.
@@ -266,13 +344,14 @@ Commands and the Rust toolchain are managed with [mise](https://mise.jdx.dev):
 ```sh
 mise install     # install the toolchain pinned in mise.toml
 mise tasks       # list available tasks
-mise run ci      # fmt-check, lint, test, build, package, and script checks
+mise run ci      # macOS CI: common Rust checks plus shell script checks
+mise run ci-core # cross-platform Rust checks used by Windows CI
 mise run test    # or run an individual task
 ```
 
-CI runs the same `mise run ci`, so a green local run matches CI. The tasks are thin wrappers over `cargo` (see `mise.toml`) if you prefer to run cargo directly. See [CONTRIBUTING.md](CONTRIBUTING.md) for more.
+CI runs `mise run ci` on macOS and `mise run ci-core` on Windows. The tasks are thin wrappers over `cargo` (see `mise.toml`) if you prefer to run cargo directly. See [CONTRIBUTING.md](CONTRIBUTING.md) for more.
 
-The LaunchAgent plist is generated by the binary itself in `src/macos/service.rs`. `cargo test` renders the generated plist and validates it with `plutil`, so there is no separate plist template to keep in sync.
+The OS abstraction layer is `src/platform.rs`. It routes shared CLI behavior to `src/macos/` or `src/windows/`; the layer state machine itself stays in `src/keymap.rs`. The LaunchAgent plist is generated by the binary itself in `src/macos/service.rs`, while the Windows scheduled task command is generated in `src/windows/service.rs`.
 
 ## License
 

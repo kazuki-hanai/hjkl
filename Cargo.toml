@@ -3,11 +3,11 @@ name = "hjkl-for-mac"
 version = "0.2.1"
 edition = "2024"
 authors = ["Kazuki Hanai"]
-description = "A tiny macOS keyboard remapper that turns semicolon + hjkl into arrow keys."
+description = "A tiny macOS and Windows keyboard remapper that turns semicolon + hjkl into arrow keys."
 repository = "https://github.com/kazuki-hanai/hjkl-for-mac"
 license = "MIT"
 readme = "README.md"
-keywords = ["macos", "keyboard", "remap", "hjkl", "launchagent"]
+keywords = ["macos", "windows", "keyboard", "remap", "hjkl"]
 categories = ["command-line-utilities"]
 
 [[bin]]
@@ -15,3 +15,6 @@ name = "hjkl"
 path = "src/main.rs"
 
 [dependencies]
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_Console", "Win32_Storage_FileSystem"] }

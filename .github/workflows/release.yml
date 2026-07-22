@@ -13,8 +13,8 @@ permissions:
   attestations: write
 
 jobs:
-  release:
-    name: Build and publish release
+  release-macos:
+    name: Build and publish macOS release
     runs-on: macos-latest
 
     steps:
@@ -84,3 +84,65 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             "$TARBALL" "${TARBALL}.sha256"
+
+  release-windows:
+    name: Build and upload Windows release
+    runs-on: windows-latest
+    needs: release-macos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up mise (installs the toolchain from mise.toml)
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+
+      - name: Verify tag is on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $status = gh api "repos/$env:GITHUB_REPOSITORY/compare/main...$env:GITHUB_SHA" --jq ".status"
+          Write-Output "compare status: $status"
+          if ($status -ne "identical" -and $status -ne "behind") {
+            Write-Error "tagged commit $env:GITHUB_SHA is not on main (status: $status); refusing to release"
+            exit 1
+          }
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          $tag = $env:GITHUB_REF_NAME -replace "^v", ""
+          $metadata = cargo metadata --format-version 1 --no-deps | ConvertFrom-Json
+          $crate = ($metadata.packages | Where-Object { $_.name -eq "hjkl-for-mac" }).version
+          Write-Output "tag=$tag crate=$crate"
+          if ($tag -ne $crate) {
+            Write-Error "tag v$tag does not match Cargo.toml version $crate"
+            exit 1
+          }
+
+      - name: Build release binary
+        run: mise run build
+
+      - name: Package artifact
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace "^v", ""
+          $dist = "hjkl-$version-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "dist/$dist" | Out-Null
+          Copy-Item "target/release/hjkl.exe" "dist/$dist/hjkl.exe"
+          Copy-Item "README.md", "LICENSE", "CHANGELOG.md" "dist/$dist/"
+          $zip = "$dist.zip"
+          Compress-Archive -Path "dist/$dist" -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ env.ZIP }}
+
+      - name: Upload Windows assets to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" "$env:ZIP" "${env:ZIP}.sha256" --clobber

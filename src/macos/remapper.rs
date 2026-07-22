@@ -25,6 +25,10 @@ pub(crate) fn set_layer_key(key_code: KeyCode) {
     LAYER_KEY.store(key_code, Ordering::SeqCst);
 }
 
+pub(crate) fn layer_key() -> KeyCode {
+    LAYER_KEY.load(Ordering::SeqCst)
+}
+
 pub(crate) unsafe extern "C" fn event_callback(
     _proxy: CGEventTapProxy,
     event_type: CGEventType,
@@ -89,14 +93,15 @@ pub(crate) unsafe extern "C" fn event_callback(
     // When the layer key is itself a modifier, that modifier is physically held
     // (we only suppress its flagsChanged, not the hardware state), so its flag
     // rides on the events the layer produces. Strip it so arrows stay bare and
-    // "layer + other" becomes exactly Command + other.
+    // "layer + other" becomes exactly the platform shortcut modifier + other.
     let layer_modifier_mask = keymap::modifier_clear_mask(layer_key);
 
     match action {
         Action::PassThrough => {
             // Keep the layer modifier off every event delivered while it is
-            // held, matching the RewriteArrow/AddCommandFlag arms (no-op when
-            // the modifier is not actually held, since its bit is then absent).
+            // held, matching the RewriteArrow/AddShortcutModifier arms (no-op
+            // when the modifier is not actually held, since its bit is then
+            // absent).
             if let Some(mask) = layer_modifier_mask {
                 event::clear_flags(event, mask);
             }
@@ -118,11 +123,11 @@ pub(crate) unsafe extern "C" fn event_callback(
             }
             event::suppress()
         }
-        Action::AddCommandFlag => {
+        Action::AddShortcutModifier => {
             if let Some(mask) = layer_modifier_mask {
                 event::clear_flags(event, mask);
             }
-            event::add_command_flag(event);
+            event::add_shortcut_modifier_flag(event);
             event
         }
     }

@@ -175,13 +175,6 @@ fn resolve_layer_key(explicit: Option<KeyCode>, plist: &Path) -> Option<KeyCode>
     explicit.or_else(|| read_configured_layer_key(plist))
 }
 
-fn layer_key_label(key_code: KeyCode) -> String {
-    match keymap::layer_key_name(key_code) {
-        Some(name) => format!("{name} (keycode {key_code})"),
-        None => format!("keycode {key_code}"),
-    }
-}
-
 fn write_plist_to(path: &Path, layer_key: Option<KeyCode>) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -399,7 +392,7 @@ fn reload_and_verify(plist: &Path, layer_key: Option<KeyCode>) -> Result<()> {
 
 fn print_layer_key(layer_key: Option<KeyCode>) {
     if let Some(code) = layer_key {
-        println!("layer key: {}", layer_key_label(code));
+        println!("layer key: {}", keymap::layer_key_label(code));
     }
 }
 
@@ -518,7 +511,10 @@ pub(crate) fn status() -> Result<()> {
         .unwrap_or(keymap::DEFAULT_LAYER_KEY);
 
     println!("label:   {LABEL}");
-    println!("layer key: {}", layer_key_label(configured_layer_key));
+    println!(
+        "layer key: {}",
+        keymap::layer_key_label(configured_layer_key)
+    );
     println!(
         "enabled: {}",
         if launch_agents.exists() {

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Windows support through a low-level keyboard hook and `SendInput`, including
+  foreground `run`, background `start`, auto-start `enable` via Task Scheduler,
+  `stop`/`restart`/`disable`, `status`, and Windows input guidance.
+- A platform abstraction layer (`src/platform.rs`) that routes shared CLI and
+  keymap behavior to macOS or Windows backends.
+- Windows CI checks and Windows release zip packaging.
+
+### Changed
+- Layer-key parsing now uses platform-specific key-code tables while keeping
+  shared friendly names where possible.
+- `; + other` is documented as the platform shortcut modifier: Command on
+  macOS and Control on Windows.
+
 ## [0.2.1]
 
 ### Added
