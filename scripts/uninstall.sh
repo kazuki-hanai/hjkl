@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-# Disable/stop the hjkl LaunchAgent and remove the installed binary by default.
-# launchd handling is delegated to the binary's own `disable` subcommand.
+# Disable/stop the macOS hjkl LaunchAgent and remove the installed binary by
+# default. launchd handling is delegated to the binary's own `disable`
+# subcommand.
 
 APP_NAME="hjkl"
 LEGACY_APP_NAME="hjkl-for-mac"
@@ -17,7 +18,7 @@ usage() {
 	cat <<USAGE_EOF
 Usage: scripts/uninstall.sh [--keep-binary]
 
-Disable and stop the hjkl LaunchAgent, then remove the installed binary.
+Disable and stop the macOS hjkl LaunchAgent, then remove the installed binary.
 
 Options:
   --keep-binary     Disable/stop only; leave the installed binary in place.
@@ -38,7 +39,7 @@ for arg in "$@"; do
 	esac
 done
 
-[ "$(uname -s)" = "Darwin" ] || { echo "error: hjkl-for-mac only supports macOS" >&2; exit 1; }
+[ "$(uname -s)" = "Darwin" ] || { echo "error: scripts/uninstall.sh is macOS-only; on Windows run 'hjkl disable' and remove hjkl.exe" >&2; exit 1; }
 
 if [ -x "$BINARY_PATH" ]; then
 	echo "Disabling LaunchAgent..."

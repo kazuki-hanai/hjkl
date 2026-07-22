@@ -32,6 +32,10 @@ run = "cargo package --locked"
 description = "Syntax-check the install/uninstall scripts"
 run = "sh -n scripts/install.sh scripts/uninstall.sh scripts/install-launch-agent.sh scripts/uninstall-launch-agent.sh"
 
+[tasks.ci-core]
+description = "Run cross-platform Rust CI checks"
+depends = ["fmt-check", "lint", "test", "build", "package"]
+
 [tasks.ci]
 description = "Run everything CI runs"
-depends = ["fmt-check", "lint", "test", "build", "package", "scripts-check"]
+depends = ["ci-core", "scripts-check"]

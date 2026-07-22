@@ -53,7 +53,7 @@ pub(crate) fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Comma
 
     match first.as_str() {
         // Legacy invocation kept for older LaunchAgent plists: `hjkl --daemon`.
-        "--daemon" | "--launchd" => {
+        "--daemon" | "--launchd" | "--service" => {
             ensure_no_extra_args(iter)?;
             Ok(Command::Run {
                 service_mode: true,
@@ -101,13 +101,16 @@ fn parse_run_flags<'a>(
         let arg = arg.as_str();
         if allow_service_mode && (arg == "--launchd" || arg == "--daemon") {
             // `--daemon` is backward compatibility only; it does not detach
-            // into the background (launchd manages the foreground process).
+            // into the background (the OS service manager owns the process).
+            service_mode = true;
+        } else if allow_service_mode && arg == "--service" {
             service_mode = true;
         } else if arg == "--layer-key" {
             let value = iter.next().ok_or_else(|| {
                 Error::from(format!(
                     "--layer-key requires a value (a key name like 'quote' or a \
-                     macOS key code).\n\nRun `{COMMAND_NAME} --help` for usage."
+                     {}).\n\nRun `{COMMAND_NAME} --help` for usage.",
+                    keymap::platform_key_code_name()
                 ))
             })?;
             layer_key = Some(parse_layer_key_value(value)?);
@@ -150,6 +153,10 @@ mod tests {
         parse_args(args.iter().map(|s| s.to_string()))
     }
 
+    fn layer_key(name: &str) -> KeyCode {
+        keymap::parse_layer_key(name).expect("test layer key should parse")
+    }
+
     #[test]
     fn parses_cli_modes() {
         assert_eq!(
@@ -174,6 +181,13 @@ mod tests {
             }
         );
         assert_eq!(
+            parse(&["--service"]).unwrap(),
+            Command::Run {
+                service_mode: true,
+                layer_key: None,
+            }
+        );
+        assert_eq!(
             parse(&["run"]).unwrap(),
             Command::Run {
                 service_mode: false,
@@ -189,6 +203,13 @@ mod tests {
         );
         assert_eq!(
             parse(&["run", "--daemon"]).unwrap(),
+            Command::Run {
+                service_mode: true,
+                layer_key: None,
+            }
+        );
+        assert_eq!(
+            parse(&["run", "--service"]).unwrap(),
             Command::Run {
                 service_mode: true,
                 layer_key: None,
@@ -219,29 +240,32 @@ mod tests {
 
     #[test]
     fn parses_layer_key_flag() {
+        let quote = layer_key("quote");
+        let grave = layer_key("grave");
         assert_eq!(
             parse(&["enable", "--layer-key", "quote"]).unwrap(),
             Command::Enable {
-                layer_key: Some(39),
+                layer_key: Some(quote),
             }
         );
         assert_eq!(
             parse(&["start", "--layer-key=grave"]).unwrap(),
             Command::Start {
-                layer_key: Some(50),
+                layer_key: Some(grave),
             }
         );
+        let quote_raw = quote.to_string();
         assert_eq!(
-            parse(&["restart", "--layer-key", "39"]).unwrap(),
+            parse(&["restart", "--layer-key", &quote_raw]).unwrap(),
             Command::Restart {
-                layer_key: Some(39),
+                layer_key: Some(quote),
             }
         );
         assert_eq!(
             parse(&["run", "--launchd", "--layer-key", "quote"]).unwrap(),
             Command::Run {
                 service_mode: true,
-                layer_key: Some(39),
+                layer_key: Some(quote),
             }
         );
     }
@@ -252,8 +276,10 @@ mod tests {
         assert!(parse(&["enable", "--layer-key"]).is_err());
         // Unknown name.
         assert!(parse(&["enable", "--layer-key", "banana"]).is_err());
-        // Modifier key code.
-        assert!(parse(&["enable", "--layer-key", "57"]).is_err());
+        // Unsupported special/toggle key code.
+        if let Some(code) = crate::platform::keys::UNSUPPORTED_MODIFIER_CODES.first() {
+            assert!(parse(&["enable", "--layer-key", &code.to_string()]).is_err());
+        }
         // stop/status/disable take no layer key.
         assert!(parse(&["stop", "--layer-key", "quote"]).is_err());
     }

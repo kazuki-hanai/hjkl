@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::cli::COMMAND_NAME;
 use crate::error::{Error, Result};
+use crate::keymap;
 use crate::macos::event;
 use crate::macos::ffi::{
     CFMachPortCreateRunLoopSource, CFMachPortRef, CFRelease, CFRunLoopAddSource,
@@ -61,9 +62,13 @@ pub(crate) fn run_event_loop(service_mode: bool) -> Result<()> {
     // `start`/`enable`/`restart` and `status` can report the real state.
     service::write_health(service::Health::Ok);
 
+    let layer_key = keymap::layer_key_label(remapper::layer_key());
+    let shortcut_modifier = keymap::shortcut_modifier_name();
+
     println!("{COMMAND_NAME} is running.");
-    println!("Tap ';' alone for ';'. Hold ';' + h/j/k/l for left/down/up/right arrows.");
-    println!("Hold ';' + another key to send Command + that key.");
+    println!("Tap {layer_key} alone to emit it.");
+    println!("Hold {layer_key} + h/j/k/l for left/down/up/right arrows.");
+    println!("Hold {layer_key} + another key to send {shortcut_modifier} + that key.");
     println!("Keep this process running. Press Ctrl-C to stop.");
 
     unsafe {

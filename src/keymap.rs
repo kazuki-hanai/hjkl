@@ -1,91 +1,28 @@
-//! Pure semicolon-layer mapping logic and state machine.
+//! Pure layer-key mapping logic and state machine.
 //!
-//! Everything here is plain data and arithmetic — no FFI — so the full layer
-//! behavior can be tested without macOS Accessibility permissions. The event
-//! tap callback in `macos::remapper` translates each keyboard event into an
-//! [`LayerState::on_key`] call and performs the returned [`Action`].
+//! Everything here is plain data and arithmetic -- no FFI -- so the full layer
+//! behavior can be tested without platform permissions. The macOS event tap and
+//! Windows keyboard hook translate each keyboard event into a
+//! [`LayerState::on_key`] call and perform the returned [`Action`].
 
-/// macOS virtual key code (same representation as `CGKeyCode`).
+#![cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+
+use crate::platform::keys;
+
+/// Platform virtual key code (`CGKeyCode` on macOS, `VIRTUAL_KEY` on Windows).
 pub(crate) type KeyCode = u16;
 
-/// Keyboard event modifier flags (same representation as `CGEventFlags`).
+/// Platform keyboard modifier flags. macOS uses `CGEventFlags`; Windows does
+/// not rewrite in-place and therefore only carries zero here.
 pub(crate) type EventFlags = u64;
 
-pub(crate) const KEY_H: KeyCode = 4;
-pub(crate) const KEY_L: KeyCode = 37;
-pub(crate) const KEY_J: KeyCode = 38;
-pub(crate) const KEY_K: KeyCode = 40;
-pub(crate) const KEY_SEMICOLON: KeyCode = 41;
-
-pub(crate) const KEY_LEFT_ARROW: KeyCode = 123;
-pub(crate) const KEY_RIGHT_ARROW: KeyCode = 124;
-pub(crate) const KEY_DOWN_ARROW: KeyCode = 125;
-pub(crate) const KEY_UP_ARROW: KeyCode = 126;
+pub(crate) use keys::{
+    KEY_DOWN_ARROW, KEY_H, KEY_J, KEY_K, KEY_L, KEY_LEFT_ARROW, KEY_RIGHT_ARROW, KEY_SEMICOLON,
+    KEY_UP_ARROW,
+};
 
 /// The layer (a.k.a. "super") key used when none is configured.
 pub(crate) const DEFAULT_LAYER_KEY: KeyCode = KEY_SEMICOLON;
-
-/// `kCGEventFlagMaskCommand`.
-pub(crate) const COMMAND_FLAG_MASK: EventFlags = 1 << 20;
-
-/// Friendly names accepted for the layer key, paired with their macOS virtual
-/// key codes. Both plain keys and modifier keys are listed. Names are matched
-/// case- and separator-insensitively (see [`normalize_key_name`]); the first
-/// entry for a given code is the canonical one used for display.
-const LAYER_KEY_NAMES: &[(&str, KeyCode)] = &[
-    ("semicolon", 41),
-    ("quote", 39),
-    ("apostrophe", 39),
-    ("grave", 50),
-    ("backtick", 50),
-    ("tab", 48),
-    ("return", 36),
-    ("enter", 36),
-    ("space", 49),
-    ("escape", 53),
-    ("delete", 51),
-    ("backslash", 42),
-    ("left_bracket", 33),
-    ("right_bracket", 30),
-    ("comma", 43),
-    ("period", 47),
-    ("slash", 44),
-    ("minus", 27),
-    ("equal", 24),
-    // Modifier keys. Left/right are distinct physical keys with distinct
-    // codes; both are usable as the layer key.
-    ("left_command", 55),
-    ("right_command", 54),
-    ("left_option", 58),
-    ("right_option", 61),
-    ("left_alt", 58),
-    ("right_alt", 61),
-    ("left_control", 59),
-    ("right_control", 62),
-    ("left_ctrl", 59),
-    ("right_ctrl", 62),
-    ("left_shift", 56),
-    ("right_shift", 60),
-];
-
-/// Modifier key codes usable as the layer key, paired with the
-/// device-dependent CGEvent flag bit that is set while that specific physical
-/// key is held. The device bit distinguishes left from right (unlike the
-/// general modifier masks) and lets us tell a `flagsChanged` down from an up.
-const MODIFIER_DEVICE_FLAGS: &[(KeyCode, EventFlags)] = &[
-    (55, 0x0000_0008), // left command  (NX_DEVICELCMDKEYMASK)
-    (54, 0x0000_0010), // right command (NX_DEVICERCMDKEYMASK)
-    (56, 0x0000_0002), // left shift     (NX_DEVICELSHIFTKEYMASK)
-    (60, 0x0000_0004), // right shift    (NX_DEVICERSHIFTKEYMASK)
-    (59, 0x0000_0001), // left control   (NX_DEVICELCTLKEYMASK)
-    (62, 0x0000_2000), // right control  (NX_DEVICERCTLKEYMASK)
-    (58, 0x0000_0020), // left option    (NX_DEVICELALTKEYMASK)
-    (61, 0x0000_0040), // right option   (NX_DEVICERALTKEYMASK)
-];
-
-/// Caps Lock (57) and Fn (63) are modifiers with special/toggle semantics that
-/// this tool does not support as a layer key.
-const UNSUPPORTED_MODIFIER_CODES: &[KeyCode] = &[57, 63];
 
 fn normalize_key_name(name: &str) -> String {
     name.chars()
@@ -95,17 +32,18 @@ fn normalize_key_name(name: &str) -> String {
 }
 
 /// Whether a key code is a modifier the layer machine drives via
-/// `flagsChanged` rather than key-down/up events.
+/// platform-specific modifier events. A modifier used as the layer key is not
+/// replayed when tapped on its own.
 pub(crate) fn is_modifier(key_code: KeyCode) -> bool {
-    MODIFIER_DEVICE_FLAGS
-        .iter()
-        .any(|(code, _)| *code == key_code)
+    keys::MODIFIER_KEY_CODES.contains(&key_code)
 }
 
 /// The device-dependent flag bit set while the given modifier key is held, if
-/// it is a supported modifier.
+/// it is a supported modifier. Only macOS needs this because modifier key
+/// transitions arrive as `flagsChanged` rather than key-down/up events.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn modifier_device_flag(key_code: KeyCode) -> Option<EventFlags> {
-    MODIFIER_DEVICE_FLAGS
+    keys::MODIFIER_DEVICE_FLAGS
         .iter()
         .find(|(code, _)| *code == key_code)
         .map(|(_, mask)| *mask)
@@ -116,26 +54,22 @@ pub(crate) fn modifier_device_flag(key_code: KeyCode) -> Option<EventFlags> {
 /// the events the layer emits so, e.g., `right_command + j` produces a bare
 /// Down arrow rather than Command+Down.
 ///
-/// Limitation: the general mask (e.g. `COMMAND_FLAG_MASK`) is shared by the
+/// Limitation: the general mask (e.g. the command flag on macOS) is shared by the
 /// left and right key of the same modifier. If the user genuinely holds the
 /// opposite-side key of the same modifier while the layer is active, clearing
 /// the general bit also drops that key's contribution. This is a rare edge and
 /// accepted; the device bit still distinguishes the two physically.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn modifier_clear_mask(key_code: KeyCode) -> Option<EventFlags> {
-    let device = modifier_device_flag(key_code)?;
-    let general: EventFlags = match key_code {
-        55 | 54 => COMMAND_FLAG_MASK, // command  (1 << 20)
-        56 | 60 => 1 << 17,           // shift
-        58 | 61 => 1 << 19,           // option / alt
-        59 | 62 => 1 << 18,           // control
-        _ => 0,
-    };
-    Some(device | general)
+    keys::MODIFIER_CLEAR_MASKS
+        .iter()
+        .find(|(code, _)| *code == key_code)
+        .map(|(_, mask)| *mask)
 }
 
 /// Parse a user-supplied layer-key spec — either a friendly name
 /// (`semicolon`, `quote`, `right_command` …, case- and separator-insensitive)
-/// or a raw decimal macOS virtual key code — into a validated key code.
+/// or a raw decimal platform virtual key code — into a validated key code.
 pub(crate) fn parse_layer_key(spec: &str) -> Result<KeyCode, String> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {
@@ -144,7 +78,7 @@ pub(crate) fn parse_layer_key(spec: &str) -> Result<KeyCode, String> {
 
     let normalized = normalize_key_name(trimmed);
 
-    let key_code = if let Some((_, code)) = LAYER_KEY_NAMES
+    let key_code = if let Some((_, code)) = keys::LAYER_KEY_NAMES
         .iter()
         .find(|(name, _)| normalize_key_name(name) == normalized)
     {
@@ -154,7 +88,8 @@ pub(crate) fn parse_layer_key(spec: &str) -> Result<KeyCode, String> {
     } else {
         return Err(format!(
             "unknown layer key '{spec}'. Use a name like 'semicolon', 'quote', or \
-             'right_command', or a numeric macOS key code."
+             'right_command', or a numeric {}.",
+            keys::PLATFORM_KEY_CODE_NAME
         ));
     };
 
@@ -163,9 +98,9 @@ pub(crate) fn parse_layer_key(spec: &str) -> Result<KeyCode, String> {
 }
 
 fn validate_layer_key(key_code: KeyCode) -> Result<(), String> {
-    if UNSUPPORTED_MODIFIER_CODES.contains(&key_code) {
+    if keys::UNSUPPORTED_MODIFIER_CODES.contains(&key_code) {
         return Err(format!(
-            "key code {key_code} (Caps Lock/Fn) is not supported as the layer key."
+            "key code {key_code} is not supported as the layer key because it has special/toggle behavior."
         ));
     }
     if hjkl_key_bit(key_code).is_some() {
@@ -188,10 +123,26 @@ fn validate_layer_key(key_code: KeyCode) -> Result<(), String> {
 
 /// Canonical display name for a key code, if it has one.
 pub(crate) fn layer_key_name(key_code: KeyCode) -> Option<&'static str> {
-    LAYER_KEY_NAMES
+    keys::LAYER_KEY_NAMES
         .iter()
         .find(|(_, code)| *code == key_code)
         .map(|(name, _)| *name)
+}
+
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+pub(crate) fn layer_key_label(key_code: KeyCode) -> String {
+    match layer_key_name(key_code) {
+        Some(name) => format!("{name} (keycode {key_code})"),
+        None => format!("keycode {key_code}"),
+    }
+}
+
+pub(crate) fn shortcut_modifier_name() -> &'static str {
+    keys::SHORTCUT_MODIFIER_NAME
+}
+
+pub(crate) fn platform_key_code_name() -> &'static str {
+    keys::PLATFORM_KEY_CODE_NAME
 }
 
 pub(crate) fn hjkl_to_arrow(key_code: KeyCode) -> Option<KeyCode> {
@@ -216,8 +167,9 @@ pub(crate) fn hjkl_key_bit(key_code: KeyCode) -> Option<u8> {
     }
 }
 
-pub(crate) fn with_command_flag(flags: EventFlags) -> EventFlags {
-    flags | COMMAND_FLAG_MASK
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn with_shortcut_modifier_flag(flags: EventFlags) -> EventFlags {
+    flags | keys::SHORTCUT_MODIFIER_FLAG_MASK
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,8 +190,8 @@ pub(crate) enum Action {
     /// Post a synthetic press of the layer key with the captured modifier
     /// flags, and swallow the original event.
     PostLayerKeyAndSuppress(EventFlags),
-    /// Add the Command modifier to the event, then deliver it.
-    AddCommandFlag,
+    /// Add the platform shortcut modifier to the event, then deliver it.
+    AddShortcutModifier,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -329,18 +281,18 @@ impl LayerState {
                         Action::PassThrough
                     }
                 } else {
-                    // Karabiner's first rule turns the layer key into
-                    // right_command when it is used with any other key. We
-                    // emulate that for normal shortcuts by adding the Command
-                    // flag to non-hjkl events while the layer is held. hjkl is
-                    // handled above and intentionally becomes a plain arrow key
-                    // instead.
+                    // Karabiner's first rule turns the layer key into a
+                    // command-like modifier when it is used with any other
+                    // key. We emulate that for normal shortcuts by adding the
+                    // platform shortcut modifier to non-hjkl events while the
+                    // layer is held. hjkl is handled above and intentionally
+                    // becomes a plain arrow key instead.
                     if direction == KeyDirection::Down {
                         self.used_as_layer = true;
                         self.command_layer_active = true;
                     }
                     if self.command_layer_active {
-                        Action::AddCommandFlag
+                        Action::AddShortcutModifier
                     } else {
                         Action::PassThrough
                     }
@@ -364,6 +316,15 @@ mod tests {
     // different one. Kept as the historical default so the assertions read the
     // same as before layer-key configurability.
     const LAYER: KeyCode = KEY_SEMICOLON;
+
+    fn named_key(name: &str) -> KeyCode {
+        let normalized = normalize_key_name(name);
+        keys::LAYER_KEY_NAMES
+            .iter()
+            .find(|(candidate, _)| normalize_key_name(candidate) == normalized)
+            .map(|(_, code)| *code)
+            .expect("test key name should exist on this platform")
+    }
 
     #[test]
     fn maps_hjkl_to_arrow_keys() {
@@ -389,14 +350,15 @@ mod tests {
     }
 
     #[test]
-    fn command_flag_is_added_without_dropping_other_flags() {
+    fn shortcut_modifier_flag_is_added_without_dropping_other_flags() {
+        let shortcut_flag = keys::SHORTCUT_MODIFIER_FLAG_MASK;
         assert_eq!(
-            with_command_flag(SHIFT_FLAG),
-            SHIFT_FLAG | COMMAND_FLAG_MASK
+            with_shortcut_modifier_flag(SHIFT_FLAG),
+            SHIFT_FLAG | shortcut_flag
         );
         assert_eq!(
-            with_command_flag(SHIFT_FLAG | COMMAND_FLAG_MASK),
-            SHIFT_FLAG | COMMAND_FLAG_MASK
+            with_shortcut_modifier_flag(SHIFT_FLAG | shortcut_flag),
+            SHIFT_FLAG | shortcut_flag
         );
     }
 
@@ -488,11 +450,17 @@ mod tests {
     }
 
     #[test]
-    fn holding_layer_adds_command_to_other_keys() {
+    fn holding_layer_adds_shortcut_modifier_to_other_keys() {
         let mut state = LayerState::new();
         assert_eq!(state.on_key(LAYER, Down, LAYER, NO_FLAGS), Suppress);
-        assert_eq!(state.on_key(LAYER, Down, KEY_A, NO_FLAGS), AddCommandFlag);
-        assert_eq!(state.on_key(LAYER, Up, KEY_A, NO_FLAGS), AddCommandFlag);
+        assert_eq!(
+            state.on_key(LAYER, Down, KEY_A, NO_FLAGS),
+            AddShortcutModifier
+        );
+        assert_eq!(
+            state.on_key(LAYER, Up, KEY_A, NO_FLAGS),
+            AddShortcutModifier
+        );
         // The layer key acted as a modifier, so it is not emitted.
         assert_eq!(state.on_key(LAYER, Up, LAYER, NO_FLAGS), Suppress);
         // After release the layer is fully reset.
@@ -524,121 +492,165 @@ mod tests {
 
     #[test]
     fn a_custom_layer_key_drives_the_layer_and_semicolon_types_normally() {
-        // Configure quote (39) as the layer key.
-        const QUOTE: KeyCode = 39;
+        let quote = named_key("quote");
         let mut state = LayerState::new();
 
         // Semicolon is now just a normal key and passes through.
         assert_eq!(
-            state.on_key(QUOTE, Down, KEY_SEMICOLON, NO_FLAGS),
+            state.on_key(quote, Down, KEY_SEMICOLON, NO_FLAGS),
             PassThrough
         );
 
         // Quote drives the layer: hold quote + j -> down arrow.
-        assert_eq!(state.on_key(QUOTE, Down, QUOTE, NO_FLAGS), Suppress);
+        assert_eq!(state.on_key(quote, Down, quote, NO_FLAGS), Suppress);
         assert_eq!(
-            state.on_key(QUOTE, Down, KEY_J, NO_FLAGS),
+            state.on_key(quote, Down, KEY_J, NO_FLAGS),
             RewriteArrow(KEY_DOWN_ARROW)
         );
         assert_eq!(
-            state.on_key(QUOTE, Up, KEY_J, NO_FLAGS),
+            state.on_key(quote, Up, KEY_J, NO_FLAGS),
             RewriteArrow(KEY_DOWN_ARROW)
         );
-        assert_eq!(state.on_key(QUOTE, Up, QUOTE, NO_FLAGS), Suppress);
+        assert_eq!(state.on_key(quote, Up, quote, NO_FLAGS), Suppress);
 
         // Tapping quote alone replays quote.
-        assert_eq!(state.on_key(QUOTE, Down, QUOTE, NO_FLAGS), Suppress);
+        assert_eq!(state.on_key(quote, Down, quote, NO_FLAGS), Suppress);
         assert_eq!(
-            state.on_key(QUOTE, Up, QUOTE, NO_FLAGS),
+            state.on_key(quote, Up, quote, NO_FLAGS),
             PostLayerKeyAndSuppress(NO_FLAGS)
         );
     }
 
     #[test]
     fn parses_layer_key_names_and_codes() {
-        assert_eq!(parse_layer_key("semicolon"), Ok(41));
-        assert_eq!(parse_layer_key("quote"), Ok(39));
-        assert_eq!(parse_layer_key("apostrophe"), Ok(39));
+        assert_eq!(parse_layer_key("semicolon"), Ok(KEY_SEMICOLON));
+        assert_eq!(parse_layer_key("quote"), Ok(named_key("quote")));
+        assert_eq!(parse_layer_key("apostrophe"), Ok(named_key("quote")));
         // Case- and separator-insensitive.
-        assert_eq!(parse_layer_key("Right-Bracket"), Ok(30));
-        assert_eq!(parse_layer_key("  TAB  "), Ok(48));
+        assert_eq!(
+            parse_layer_key("Right-Bracket"),
+            Ok(named_key("right_bracket"))
+        );
+        assert_eq!(parse_layer_key("  TAB  "), Ok(named_key("tab")));
         // Raw numeric codes.
-        assert_eq!(parse_layer_key("39"), Ok(39));
-        assert_eq!(parse_layer_key("50"), Ok(50));
+        let quote = named_key("quote");
+        let grave = named_key("grave");
+        assert_eq!(parse_layer_key(&quote.to_string()), Ok(quote));
+        assert_eq!(parse_layer_key(&grave.to_string()), Ok(grave));
     }
 
     #[test]
     fn parses_modifier_layer_keys_with_left_right() {
-        assert_eq!(parse_layer_key("right_command"), Ok(54));
-        assert_eq!(parse_layer_key("left_command"), Ok(55));
-        assert_eq!(parse_layer_key("Right Option"), Ok(61));
-        assert_eq!(parse_layer_key("left-ctrl"), Ok(59));
-        assert_eq!(parse_layer_key("right_shift"), Ok(60));
+        let right_command = named_key("right_command");
+        let left_command = named_key("left_command");
+        assert_eq!(parse_layer_key("right_command"), Ok(right_command));
+        assert_eq!(parse_layer_key("left_command"), Ok(left_command));
+        assert_eq!(
+            parse_layer_key("Right Option"),
+            Ok(named_key("right_option"))
+        );
+        assert_eq!(parse_layer_key("left-ctrl"), Ok(named_key("left_control")));
+        assert_eq!(parse_layer_key("right_shift"), Ok(named_key("right_shift")));
         // Numeric modifier codes are accepted too.
-        assert_eq!(parse_layer_key("54"), Ok(54));
+        assert_eq!(
+            parse_layer_key(&right_command.to_string()),
+            Ok(right_command)
+        );
 
-        assert!(is_modifier(54));
-        assert!(is_modifier(55));
-        assert!(!is_modifier(41)); // semicolon is not a modifier
-        // Left and right of the same modifier get distinct device flag bits.
-        assert_eq!(modifier_device_flag(55), Some(0x8)); // left command
-        assert_eq!(modifier_device_flag(54), Some(0x10)); // right command
-        assert_ne!(modifier_device_flag(55), modifier_device_flag(54));
-        assert_eq!(modifier_device_flag(41), None);
+        assert!(is_modifier(right_command));
+        assert!(is_modifier(left_command));
+        assert!(!is_modifier(KEY_SEMICOLON)); // semicolon is not a modifier
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    fn modifier_clear_mask_includes_device_and_general_bits() {
+    fn macos_modifier_device_flags_track_left_and_right_keys() {
+        let left_command = named_key("left_command");
+        let right_command = named_key("right_command");
+        // Left and right of the same modifier get distinct device flag bits.
+        assert_eq!(modifier_device_flag(left_command), Some(0x8));
+        assert_eq!(modifier_device_flag(right_command), Some(0x10));
+        assert_ne!(
+            modifier_device_flag(left_command),
+            modifier_device_flag(right_command)
+        );
+        assert_eq!(modifier_device_flag(KEY_SEMICOLON), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_modifier_clear_mask_includes_device_and_general_bits() {
+        let right_command = named_key("right_command");
+        let left_shift = named_key("left_shift");
         // right command: device bit 0x10 + general command mask (1 << 20).
-        assert_eq!(modifier_clear_mask(54), Some(0x10 | COMMAND_FLAG_MASK));
+        assert_eq!(
+            modifier_clear_mask(right_command),
+            Some(0x10 | keys::SHORTCUT_MODIFIER_FLAG_MASK)
+        );
         // left shift: device bit 0x2 + general shift mask (1 << 17).
-        assert_eq!(modifier_clear_mask(56), Some(0x2 | (1 << 17)));
+        assert_eq!(modifier_clear_mask(left_shift), Some(0x2 | (1 << 17)));
         // Non-modifier keys contribute no mask.
-        assert_eq!(modifier_clear_mask(41), None);
+        assert_eq!(modifier_clear_mask(KEY_SEMICOLON), None);
     }
 
     #[test]
     fn rejects_invalid_layer_keys() {
         assert!(parse_layer_key("").is_err());
         assert!(parse_layer_key("not_a_key").is_err());
-        // Caps Lock and Fn are unsupported modifiers.
-        assert!(parse_layer_key("57").is_err()); // caps lock
-        assert!(parse_layer_key("63").is_err()); // fn
+        if let Some(code) = keys::UNSUPPORTED_MODIFIER_CODES.first() {
+            assert!(parse_layer_key(&code.to_string()).is_err());
+        }
         // h/j/k/l are arrow targets and cannot also be the layer key.
-        assert!(parse_layer_key("4").is_err()); // h
-        assert!(parse_layer_key("40").is_err()); // k
+        assert!(parse_layer_key(&KEY_H.to_string()).is_err());
+        assert!(parse_layer_key(&KEY_K.to_string()).is_err());
         // The arrow keys the layer emits are rejected too.
-        assert!(parse_layer_key("123").is_err()); // left arrow
-        assert!(parse_layer_key("126").is_err()); // up arrow
+        assert!(parse_layer_key(&KEY_LEFT_ARROW.to_string()).is_err());
+        assert!(parse_layer_key(&KEY_UP_ARROW.to_string()).is_err());
     }
 
     #[test]
     fn reports_canonical_key_names() {
-        assert_eq!(layer_key_name(41), Some("semicolon"));
-        assert_eq!(layer_key_name(39), Some("quote"));
-        assert_eq!(layer_key_name(54), Some("right_command"));
-        assert_eq!(layer_key_name(55), Some("left_command"));
+        assert_eq!(layer_key_name(KEY_SEMICOLON), Some("semicolon"));
+        assert_eq!(layer_key_name(named_key("quote")), Some("quote"));
+        assert_eq!(
+            layer_key_name(named_key("right_command")),
+            Some("right_command")
+        );
+        assert_eq!(
+            layer_key_name(named_key("left_command")),
+            Some("left_command")
+        );
         assert_eq!(layer_key_name(999), None);
     }
 
     #[test]
     fn a_modifier_layer_key_drives_the_layer_like_any_other() {
-        // right_command as the layer key. The state machine itself is agnostic
-        // to modifier-ness; the caller derives direction from flagsChanged.
-        const RCMD: KeyCode = 54;
+        let right_command = named_key("right_command");
         let mut state = LayerState::new();
-        assert_eq!(state.on_key(RCMD, Down, RCMD, NO_FLAGS), Suppress);
         assert_eq!(
-            state.on_key(RCMD, Down, KEY_H, NO_FLAGS),
+            state.on_key(right_command, Down, right_command, NO_FLAGS),
+            Suppress
+        );
+        assert_eq!(
+            state.on_key(right_command, Down, KEY_H, NO_FLAGS),
             RewriteArrow(KEY_LEFT_ARROW)
         );
         assert_eq!(
-            state.on_key(RCMD, Up, KEY_H, NO_FLAGS),
+            state.on_key(right_command, Up, KEY_H, NO_FLAGS),
             RewriteArrow(KEY_LEFT_ARROW)
         );
-        assert_eq!(state.on_key(RCMD, Up, RCMD, NO_FLAGS), Suppress);
-        // Used with a non-hjkl key it adds Command.
-        assert_eq!(state.on_key(RCMD, Down, RCMD, NO_FLAGS), Suppress);
-        assert_eq!(state.on_key(RCMD, Down, KEY_A, NO_FLAGS), AddCommandFlag);
+        assert_eq!(
+            state.on_key(right_command, Up, right_command, NO_FLAGS),
+            Suppress
+        );
+        // Used with a non-hjkl key it adds the shortcut modifier.
+        assert_eq!(
+            state.on_key(right_command, Down, right_command, NO_FLAGS),
+            Suppress
+        );
+        assert_eq!(
+            state.on_key(right_command, Down, KEY_A, NO_FLAGS),
+            AddShortcutModifier
+        );
     }
 }
