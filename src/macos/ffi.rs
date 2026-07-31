@@ -44,6 +44,9 @@ pub(crate) const K_CG_EVENT_FLAGS_CHANGED: CGEventType = 12;
 pub(crate) const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: CGEventType = 0xFFFF_FFFE;
 pub(crate) const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: CGEventType = 0xFFFF_FFFF;
 
+pub(crate) const K_CG_EVENT_FLAG_MASK_NUMERIC_PAD: CGEventFlags = 1 << 21;
+pub(crate) const K_CG_EVENT_FLAG_MASK_SECONDARY_FN: CGEventFlags = 1 << 23;
+
 pub(crate) const K_CG_KEYBOARD_EVENT_KEYCODE: CGEventField = 9;
 pub(crate) const K_CG_EVENT_SOURCE_USER_DATA: CGEventField = 42;
 
@@ -63,6 +66,13 @@ unsafe extern "C" {
     pub(crate) fn CGEventSetIntegerValueField(event: CGEventRef, field: CGEventField, value: i64);
     pub(crate) fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
     pub(crate) fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
+    #[cfg(test)]
+    pub(crate) fn CGEventKeyboardGetUnicodeString(
+        event: CGEventRef,
+        max_string_length: UniCharCount,
+        actual_string_length: *mut UniCharCount,
+        unicode_string: *mut u16,
+    );
     pub(crate) fn CGEventKeyboardSetUnicodeString(
         event: CGEventRef,
         string_length: UniCharCount,
