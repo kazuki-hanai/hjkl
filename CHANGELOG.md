@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-31
+
+### Fixed
+
+- macOS arrow remapping now emits the same modifier flags and Unicode payload
+  as native arrow keys. Modified shortcuts such as `Control + ; + l` now
+  behave like `Control + Right Arrow`, including in global window and Space
+  management shortcuts.
+
 ## [0.3.1] - 2026-07-22
 
 ### Fixed
@@ -71,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS CI workflow (fmt, clippy, test, build, package, script lint).
 - Release workflow that builds and publishes a macOS binary on `v*` tags.
 
-[Unreleased]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kazuki-hanai/hjkl/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/kazuki-hanai/hjkl/compare/v0.1.0...v0.2.1
