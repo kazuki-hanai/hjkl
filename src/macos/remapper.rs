@@ -109,11 +109,13 @@ pub(crate) unsafe extern "C" fn event_callback(
         }
         Action::Suppress => event::suppress(),
         Action::RewriteArrow(arrow_key) => {
-            event::rewrite_as_arrow(event, arrow_key);
+            // `rewrite_as_arrow` returns a fresh, native-identical arrow event
+            // (or the original as a fallback); deliver whatever it hands back.
+            let arrow = event::rewrite_as_arrow(event, arrow_key);
             if let Some(mask) = layer_modifier_mask {
-                event::clear_flags(event, mask);
+                event::clear_flags(arrow, mask);
             }
-            event
+            arrow
         }
         Action::PostLayerKeyAndSuppress(flags) => {
             // Tapping a modifier layer key alone does nothing (a synthesized
