@@ -20,7 +20,10 @@ pub(crate) type CFRunLoopRef = *mut c_void;
 pub(crate) type CFRunLoopSourceRef = *mut c_void;
 pub(crate) type CFStringRef = *const c_void;
 pub(crate) type CFTypeRef = *const c_void;
+#[cfg(test)]
+pub(crate) type CFDataRef = *const c_void;
 pub(crate) type CGEventRef = *mut c_void;
+pub(crate) type CGEventSourceRef = *mut c_void;
 pub(crate) type CGEventTapProxy = *mut c_void;
 pub(crate) type CGEventType = u32;
 pub(crate) type CGEventMask = u64;
@@ -47,7 +50,9 @@ pub(crate) const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: CGEventType = 0xFFFF_FFF
 pub(crate) const K_CG_EVENT_FLAG_MASK_NUMERIC_PAD: CGEventFlags = 1 << 21;
 pub(crate) const K_CG_EVENT_FLAG_MASK_SECONDARY_FN: CGEventFlags = 1 << 23;
 
+pub(crate) const K_CG_KEYBOARD_EVENT_AUTOREPEAT: CGEventField = 8;
 pub(crate) const K_CG_KEYBOARD_EVENT_KEYCODE: CGEventField = 9;
+pub(crate) const K_CG_KEYBOARD_EVENT_KEYBOARD_TYPE: CGEventField = 10;
 pub(crate) const K_CG_EVENT_SOURCE_USER_DATA: CGEventField = 42;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -66,6 +71,15 @@ unsafe extern "C" {
     pub(crate) fn CGEventSetIntegerValueField(event: CGEventRef, field: CGEventField, value: i64);
     pub(crate) fn CGEventGetFlags(event: CGEventRef) -> CGEventFlags;
     pub(crate) fn CGEventSetFlags(event: CGEventRef, flags: CGEventFlags);
+    pub(crate) fn CGEventGetType(event: CGEventRef) -> CGEventType;
+    pub(crate) fn CGEventGetTimestamp(event: CGEventRef) -> u64;
+    pub(crate) fn CGEventSetTimestamp(event: CGEventRef, timestamp: u64);
+    /// Derive an event source from an existing event so a synthesized
+    /// replacement stays consistent with the event being filtered. May return
+    /// null for events created with another process's private source state.
+    pub(crate) fn CGEventCreateSourceFromEvent(event: CGEventRef) -> CGEventSourceRef;
+    #[cfg(test)]
+    pub(crate) fn CGEventCreateData(allocator: CFAllocatorRef, event: CGEventRef) -> CFDataRef;
     #[cfg(test)]
     pub(crate) fn CGEventKeyboardGetUnicodeString(
         event: CGEventRef,
@@ -116,4 +130,8 @@ unsafe extern "C" {
     );
     pub(crate) fn CFRunLoopRun();
     pub(crate) fn CFRelease(cf: CFTypeRef);
+    #[cfg(test)]
+    pub(crate) fn CFDataGetLength(data: CFDataRef) -> CFIndex;
+    #[cfg(test)]
+    pub(crate) fn CFDataGetBytePtr(data: CFDataRef) -> *const u8;
 }

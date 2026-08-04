@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-04
+
+### Fixed
+
+- macOS `; + h/j/k/l` now works again while composing text in an IME (for
+  example Japanese conversion). The remapper builds a brand-new arrow key event
+  instead of editing the key code of the original `h`/`j`/`k`/`l` event, so the
+  internal character fields that IME composition reads match a real arrow key.
+  The 0.3.2 in-place rewrite left those fields set to the original letter, which
+  broke segment navigation during conversion. Held modifiers, auto-repeat and
+  the `Control + ; + l` window/Space shortcuts fixed in 0.3.2 continue to work.
+
 ## [0.3.2] - 2026-07-31
 
 ### Fixed
@@ -80,7 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS CI workflow (fmt, clippy, test, build, package, script lint).
 - Release workflow that builds and publishes a macOS binary on `v*` tags.
 
-[Unreleased]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/kazuki-hanai/hjkl/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kazuki-hanai/hjkl/compare/v0.2.1...v0.3.0
